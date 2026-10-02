@@ -1,0 +1,71 @@
+<Template>
+
+  <!-- Serato-like layout decision (docs/decisions/0002-seratolike-layout-split.md):
+  LateNight always shows the big Full deck once the mixer is visible. For
+  this skin the deck+mixer band is meant to stay thin so the library below
+  can dominate, so the "mixer shown" branch below uses the Compact deck
+  (still has the jogwheel/spinny, title/artist/key/BPM and transport) instead
+  of Full (which adds rate/beatgrid/loop controls that don't fit the Serato
+  look we're going for here). -->
+  <WidgetGroup>
+    <Layout>vertical</Layout>
+    <MaximumSize>,180</MaximumSize>
+    <Children>
+
+      <Template src="skins:SeratoLike/decks/deck_singletons.xml">
+        <SetVariable name="Type">deck</SetVariable>
+        <SetVariable name="Group">[Channel<Variable name="ChanNum"/>]</SetVariable>
+      </Template>
+
+      <WidgetStack currentpage="[Skin],show_mixer" persist="true">
+        <Children>
+
+          <!-- no mixer -->
+          <WidgetStack currentpage="[LateNight],deck_size_without_mixer" persist="true">
+            <Children>
+              <!-- minimal deck selected -->
+              <WidgetGroup trigger="[LateNight],show_mini_deck">
+                <Layout>horizontal</Layout>
+                <Children>
+                  <SingletonContainer>
+                    <ObjectName>Deck<Variable name="ChanNum"/>_Mini</ObjectName>
+                  </SingletonContainer>
+                </Children>
+              </WidgetGroup>
+              <!-- Compact deck selected -->
+              <WidgetGroup trigger="[LateNight],show_compact_deck">
+                <Layout>horizontal</Layout>
+                <Children>
+                <SingletonContainer>
+                  <ObjectName>Deck<Variable name="ChanNum"/>_Compact</ObjectName>
+                </SingletonContainer>
+                </Children>
+              </WidgetGroup>
+              <!-- Full deck selected -->
+              <WidgetGroup trigger="[LateNight],show_full_deck">
+                <Layout>horizontal</Layout>
+                <Children>
+                  <SingletonContainer>
+                    <ObjectName>Deck<Variable name="ChanNum"/>_Full</ObjectName>
+                  </SingletonContainer>
+                </Children>
+              </WidgetGroup>
+            </Children>
+          </WidgetStack>
+
+          <!-- mixer shown = compact deck (see layout decision note above) -->
+          <WidgetGroup trigger="[Skin],show_mixer" on_hide_select="0">
+            <Layout>horizontal</Layout>
+            <Children>
+              <SingletonContainer>
+                <ObjectName>Deck<Variable name="ChanNum"/>_Compact</ObjectName>
+              </SingletonContainer>
+            </Children>
+          </WidgetGroup>
+
+        </Children>
+      </WidgetStack>
+
+    </Children>
+  </WidgetGroup>
+</Template>

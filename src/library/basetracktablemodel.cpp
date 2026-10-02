@@ -22,6 +22,7 @@
 #include "mixer/playerinfo.h"
 #include "mixer/playermanager.h"
 #include "moc_basetracktablemodel.cpp"
+#include "track/keyutils.h"
 #include "track/track.h"
 #include "util/assert.h"
 #include "util/clipboard.h"
@@ -371,15 +372,31 @@ QVariant BaseTrackTableModel::data(
                 index,
                 ColumnCache::COLUMN_LIBRARYTABLE_COLOR);
         const auto rgbColor = mixxx::RgbColor::fromQVariant(rgbColorValue);
-        if (!rgbColor) {
-            return QVariant();
+        if (rgbColor) {
+            auto bgColor = mixxx::RgbColor::toQColor(rgbColor);
+            DEBUG_ASSERT(bgColor.isValid());
+            DEBUG_ASSERT(m_backgroundColorOpacity >= 0.0);
+            DEBUG_ASSERT(m_backgroundColorOpacity <= 1.0);
+            bgColor.setAlphaF(static_cast<float>(m_backgroundColorOpacity));
+            return QBrush(bgColor);
         }
-        auto bgColor = mixxx::RgbColor::toQColor(rgbColor);
-        DEBUG_ASSERT(bgColor.isValid());
-        DEBUG_ASSERT(m_backgroundColorOpacity >= 0.0);
-        DEBUG_ASSERT(m_backgroundColorOpacity <= 1.0);
-        bgColor.setAlphaF(static_cast<float>(m_backgroundColorOpacity));
-        return QBrush(bgColor);
+        // No manual track color is set for this row: color the Key column
+        // by its Camelot wheel position so harmonically related tracks are
+        // visually grouped at a glance (see docs/decisions/0002-*.md).
+        if (mapColumn(index.column()) == ColumnCache::COLUMN_LIBRARYTABLE_KEY) {
+            const auto keyIdValue = rawSiblingValue(
+                    index, ColumnCache::COLUMN_LIBRARYTABLE_KEY_ID);
+            bool ok = false;
+            const int keyId = keyIdValue.toInt(&ok);
+            if (ok) {
+                const QColor camelotColor = KeyUtils::keyToCamelotColor(
+                        KeyUtils::keyFromNumericValue(keyId));
+                if (camelotColor.isValid()) {
+                    return QBrush(camelotColor);
+                }
+            }
+        }
+        return QVariant();
     } else if (role == Qt::ForegroundRole) {
         // Custom text color for missing tracks
         // Visible in playlists, crates and Missing feature.
@@ -721,12 +738,41 @@ QVariant BaseTrackTableModel::roleValue(
                 }
             }
         }
-        case ColumnCache::COLUMN_LIBRARYTABLE_KEY:
+        case ColumnCache::COLUMN_LIBRARYTABLE_KEY: {
             // The Key value is determined by either the KEY_ID or KEY column
-            return KeyUtils::keyFromKeyTextAndIdFields(
+            const QVariant formattedKeyValue = KeyUtils::keyFromKeyTextAndIdFields(
                     rawValue,
                     rawSiblingValue(
                             index, ColumnCache::COLUMN_LIBRARYTABLE_KEY_ID));
+            if (role != Qt::DisplayRole) {
+                // Tooltip, CSV export, etc. keep the single notation the
+                // user configured in preferences (unchanged behavior).
+                return formattedKeyValue;
+            }
+            // On-screen library column only: show both the Camelot/Lancelot
+            // notation (e.g. "8A") and the user's configured notation (e.g.
+            // "Dm") together, regardless of the key notation preference.
+            // See docs/decisions/0004-dual-notation-key-column.md.
+            const auto keyIdValue = rawSiblingValue(
+                    index, ColumnCache::COLUMN_LIBRARYTABLE_KEY_ID);
+            bool ok = false;
+            const int keyId = keyIdValue.toInt(&ok);
+            if (ok) {
+                const auto key = KeyUtils::keyFromNumericValue(keyId);
+                if (key != mixxx::track::io::key::INVALID) {
+                    const QString camelot = KeyUtils::keyToString(
+                            key, KeyUtils::KeyNotation::Lancelot);
+                    const QString traditional = KeyUtils::keyToString(
+                            key, KeyUtils::KeyNotation::Traditional);
+                    if (!camelot.isEmpty() && !traditional.isEmpty()) {
+                        return QStringLiteral("%1 · %2").arg(camelot, traditional);
+                    }
+                }
+            }
+            // No key detected (or unparseable value): preserve existing
+            // behavior, e.g. an empty string.
+            return formattedKeyValue;
+        }
         case ColumnCache::COLUMN_LIBRARYTABLE_REPLAYGAIN: {
             if (rawValue.isNull()) {
                 return QVariant();

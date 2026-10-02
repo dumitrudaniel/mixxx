@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QColor>
 #include <QList>
 #include <QMutex>
 #include <QString>
@@ -137,6 +138,15 @@ class KeyUtils {
             const QVariant& keyTextField, const QVariant& keyIdField);
     static QString keyFromKeyTextAndIdValues(const QString& keyText,
             const mixxx::track::io::key::ChromaticKey& key);
+
+    /// Returns a color representing the key's position on the Camelot
+    /// (Lancelot) wheel, for use in UI elements that visually group
+    /// harmonically compatible tracks (e.g. the library "key" column).
+    /// Major ("B") keys get a lighter tint of their relative minor ("A")
+    /// key's hue so the 12 wheel positions stay recognizable while major
+    /// and minor remain distinguishable. Returns an invalid QColor for
+    /// an invalid/unknown key.
+    static QColor keyToCamelotColor(mixxx::track::io::key::ChromaticKey key);
 
   private:
     static QMutex s_notationMutex;
