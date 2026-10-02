@@ -34,6 +34,19 @@
                 </Children>
               </WidgetGroup>
 
+              <!-- Phase guide: thin mark-free strips, one per deck, sandwiched
+              between the two main waveforms so their beat ticks (and
+              playhead lines) can be compared at a glance, independent of
+              Sync. See phase_strip.xml and docs/decisions/0006. -->
+              <Template src="skins:SeratoLike/phase_strip.xml">
+                <SetVariable name="ChanNum">1</SetVariable>
+                <SetVariable name="BgColorWaveform"><Variable name="BgColorWaveform_12"/></SetVariable>
+              </Template>
+              <Template src="skins:SeratoLike/phase_strip.xml">
+                <SetVariable name="ChanNum">2</SetVariable>
+                <SetVariable name="BgColorWaveform"><Variable name="BgColorWaveform_12"/></SetVariable>
+              </Template>
+
               <WidgetGroup>
                 <Layout>horizontal</Layout>
                 <SizePolicy>me,me</SizePolicy>
