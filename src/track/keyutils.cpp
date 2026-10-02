@@ -278,6 +278,27 @@ inline int lancelotNumberToOpenKeyNumber(const int lancelotNumber)  {
     return okNumber;
 }
 
+// One base color per Camelot wheel number (1-12), spread around the hue
+// wheel so adjacent numbers are visually distinct. The "B" (major) key of
+// a given number is rendered as a lighter tint of the same base color (see
+// KeyUtils::keyToCamelotColor) rather than having its own independent
+// color, so the 12 radial positions on the wheel stay recognizable.
+// See docs/decisions/0002-camelot-key-coloring.md for the rationale.
+constexpr QRgb s_camelotWheelColors[12] = {
+        0xE53935, // 1 - red
+        0xFB8C00, // 2 - orange
+        0xFDD835, // 3 - yellow
+        0xC0CA33, // 4 - lime
+        0x43A047, // 5 - green
+        0x00ACC1, // 6 - teal
+        0x1E88E5, // 7 - blue
+        0x3949AB, // 8 - indigo
+        0x8E24AA, // 9 - purple
+        0xD81B60, // 10 - pink
+        0x6D4C41, // 11 - brown
+        0x546E7A, // 12 - blue-grey
+};
+
 } // namespace
 
 QMutex KeyUtils::s_notationMutex;
@@ -839,4 +860,26 @@ QVariant KeyUtils::keyFromKeyTextAndIdFields(
 // static
 QString KeyUtils::keyFromKeyTextAndIdValues(const QString& keyText, const ChromaticKey& keyId) {
     return keyId == mixxx::track::io::key::INVALID ? keyText : KeyUtils::keyToString(keyId);
+}
+
+// static
+QColor KeyUtils::keyToCamelotColor(ChromaticKey key) {
+    if (!ChromaticKey_IsValid(key) || key == mixxx::track::io::key::INVALID) {
+        return QColor();
+    }
+    // Reuse the existing Lancelot (Camelot) string formatting instead of
+    // re-deriving the wheel number/mode from scratch.
+    const QString lancelot = keyToString(key, KeyNotation::Lancelot);
+    if (lancelot.size() < 2) {
+        return QColor();
+    }
+    const QChar modeSuffix = lancelot.at(lancelot.size() - 1);
+    bool ok = false;
+    const int wheelNumber = lancelot.left(lancelot.size() - 1).toInt(&ok);
+    if (!ok || wheelNumber < 1 || wheelNumber > 12) {
+        return QColor();
+    }
+    const QColor baseColor(s_camelotWheelColors[wheelNumber - 1]);
+    // 'B' = major key: lighter tint of the same hue as the relative 'A' (minor).
+    return modeSuffix == QLatin1Char('B') ? baseColor.lighter(135) : baseColor;
 }
