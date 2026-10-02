@@ -1,0 +1,39 @@
+<Template>
+  <!-- "Phase guide" strip: a thin, mark-free instance of the same waveform
+  visual used in waveform.xml, zoomed identically (zoom is a single global
+  preference shared by every Visual in the app, not per-widget), so beat
+  ticks from deck 1 and deck 2 line up on the same x-axis when the two
+  strips sit directly on top of each other. This approximates the
+  "thin strip with colored beat pips between the two decks" Dan pointed out
+  from a Serato screenshot (see docs/decisions/0006). It is a skin-only
+  composition, not a new renderer: it reuses the existing RGB waveform
+  widget and WaveformRenderBeat (already wired per ADR 0005), just with the
+  signal fill colors matched to the background so the beat ticks (and
+  playhead line) are what stands out, and with no hotcue/loop/intro/outro
+  marks (those would just add visual noise at this height/purpose). -->
+  <SetVariable name="Group">[Channel<Variable name="ChanNum"/>]</SetVariable>
+
+  <WidgetGroup>
+    <ObjectName>PhaseStrip<Variable name="ChanNum"/></ObjectName>
+    <Layout>horizontal</Layout>
+    <Size>1me,14f</Size>
+    <Children>
+      <Visual>
+        <TooltipId>waveform_display</TooltipId>
+        <Channel><Variable name="ChanNum"/></Channel>
+        <BgColor><Variable name="BgColorWaveform"/></BgColor>
+        <SignalColor><Variable name="BgColorWaveform"/></SignalColor>
+        <SignalHighColor><Variable name="BgColorWaveform"/></SignalHighColor>
+        <SignalMidColor><Variable name="BgColorWaveform"/></SignalMidColor>
+        <SignalLowColor><Variable name="BgColorWaveform"/></SignalLowColor>
+        <SignalRGBHighColor><Variable name="BgColorWaveform"/></SignalRGBHighColor>
+        <SignalRGBMidColor><Variable name="BgColorWaveform"/></SignalRGBMidColor>
+        <SignalRGBLowColor><Variable name="BgColorWaveform"/></SignalRGBLowColor>
+        <BeatColor><Variable name="BeatColor"/></BeatColor>
+        <AxesColor><Variable name="BgColorWaveform"/></AxesColor>
+        <PlayPosColor><Variable name="PlayPosColor"/></PlayPosColor>
+        <EndOfTrackColor><Variable name="EndOfTrackColor"/></EndOfTrackColor>
+      </Visual>
+    </Children>
+  </WidgetGroup>
+</Template>
