@@ -19,7 +19,7 @@
           "parallel horizontal waveforms up top" layout from PLAN.md. -->
           <WidgetGroup>
             <Layout>vertical</Layout>
-            <Size>100me,40me</Size>
+            <Size>100me,68me</Size>
             <Children>
 
               <WidgetGroup>
