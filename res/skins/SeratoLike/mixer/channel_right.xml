@@ -49,6 +49,21 @@ vertical layout and a reversed side-by-side layout for two-deck mode -->
             </Connection>
           </SliderComposed>
 
+          <WidgetGroup><Size>1min,4f</Size></WidgetGroup>
+
+          <!-- Faza 1.5: starts a 16-bar automated transition from this deck
+               (2) to the other deck (1). See channel_left.xml and
+               docs/decisions/0008 for the full behavior/safety notes. -->
+          <Template src="skins:SeratoLike/controls/button_1state.xml">
+            <SetVariable name="TooltipId">automix_transition_to_1</SetVariable>
+            <SetVariable name="ObjectName">AutomixTransitionButton2</SetVariable>
+            <SetVariable name="BtnType"></SetVariable>
+            <SetVariable name="ConfigKey">[Channel2],automix_transition_to_1</SetVariable>
+            <SetVariable name="Size">42f,16f</SetVariable>
+            <SetVariable name="state_0_text">&lt; MIX</SetVariable>
+            <SetVariable name="Align">center</SetVariable>
+          </Template>
+
           <WidgetGroup><Size>1min,0me</Size></WidgetGroup>
         </Children>
       </WidgetGroup><!-- VolumeGain2Decks -->

@@ -9,6 +9,7 @@
 #include "engine/enginemixer.h"
 #include "library/library.h"
 #include "library/trackcollectionmanager.h"
+#include "mixer/automixtransitioncontroller.h"
 #include "mixer/auxiliary.h"
 #include "mixer/deck.h"
 #include "mixer/microphone.h"
@@ -115,7 +116,8 @@ PlayerManager::PlayerManager(UserSettingsPointer pConfig,
                   ConfigKey(kAppGroup, QStringLiteral("num_microphones")), true, true)),
           m_pCONumAuxiliaries(std::make_unique<ControlObject>(
                   ConfigKey(kAppGroup, QStringLiteral("num_auxiliaries")), true, true)),
-          m_pTrackAnalysisScheduler(TrackAnalysisScheduler::NullPointer()) {
+          m_pTrackAnalysisScheduler(TrackAnalysisScheduler::NullPointer()),
+          m_pAutomixTransitionController(nullptr) {
     m_pCONumDecks->addAlias(ConfigKey(kLegacyGroup, QStringLiteral("num_decks")));
     m_pCONumDecks->connectValueChangeRequest(this,
             &PlayerManager::slotChangeNumDecks, Qt::DirectConnection);
@@ -398,6 +400,13 @@ void PlayerManager::addDeckInner() {
 
     // Setup EQ ControlProxies used for resetting EQs on track load
     pDeck->setupEqControls();
+
+    // Faza 1.5: the automix transition trigger buttons/logic are hardcoded to
+    // [Channel1]/[Channel2] (the SeratoLike skin is 2-deck only, see
+    // docs/decisions/0003), so construct the controller as soon as both exist.
+    if (m_decks.size() == 2 && !m_pAutomixTransitionController) {
+        m_pAutomixTransitionController = new AutomixTransitionController(this);
+    }
 }
 
 void PlayerManager::loadSamplers() {

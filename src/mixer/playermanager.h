@@ -14,6 +14,7 @@
 #include "util/parented_ptr.h"
 #include "util/performancetimer.h"
 
+class AutomixTransitionController;
 class Auxiliary;
 class BaseTrackPlayer;
 class ControlObject;
@@ -297,6 +298,9 @@ class PlayerManager : public PlayerManagerInterface {
     std::unique_ptr<ControlObject> m_pCONumMicrophones;
     std::unique_ptr<ControlObject> m_pCONumAuxiliaries;
     parented_ptr<ControlProxy> m_pAutoDjEnabled;
+    // Faza 1.5: constructed once deck 2 exists (see addDeckInner()). Parented
+    // to this, so no explicit delete needed.
+    AutomixTransitionController* m_pAutomixTransitionController;
 
     TrackAnalysisScheduler::Pointer m_pTrackAnalysisScheduler;
 
