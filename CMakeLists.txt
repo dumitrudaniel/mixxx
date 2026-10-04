@@ -2703,6 +2703,7 @@ if(BUILD_TESTING)
     src/test/audiotaperpot_test.cpp
     src/test/autodjprocessor_test.cpp
     src/test/basetrackcache_test.cpp
+    src/test/basetracktablemodel_test.cpp
     src/test/beatgridtest.cpp
     src/test/beatmaptest.cpp
     src/test/beatstest.cpp
