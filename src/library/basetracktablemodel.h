@@ -6,6 +6,7 @@
 
 #include "library/columncache.h"
 #include "library/trackmodel.h"
+#include "proto/keys.pb.h"
 #include "track/track_decl.h"
 
 class TrackCollectionManager;
@@ -124,6 +125,15 @@ class BaseTrackTableModel : public QAbstractTableModel, public TrackModel {
 
     static constexpr bool kApplyPlayedTrackColorDefault = true;
     static void setApplyPlayedTrackColor(bool apply);
+
+    /// Builds the "<Camelot> · <Traditional>" text shown in the library
+    /// Key column's Qt::DisplayRole (e.g. "8A · Dm"), combining the
+    /// Camelot/Lancelot notation with the user's configured notation.
+    /// Returns an empty string if `key` is invalid or either notation
+    /// cannot be rendered. Pure function, extracted from roleValue() so
+    /// it can be unit tested without a fully constructed model.
+    /// See docs/decisions/0004-dual-notation-key-column.md.
+    static QString formatDualNotationKeyText(mixxx::track::io::key::ChromaticKey key);
 
   protected:
     // Build a map from the column names to their indices

@@ -96,6 +96,22 @@ void BaseTrackTableModel::setApplyPlayedTrackColor(bool apply) {
     s_bApplyPlayedTrackColor = apply;
 }
 
+// static
+QString BaseTrackTableModel::formatDualNotationKeyText(
+        mixxx::track::io::key::ChromaticKey key) {
+    if (key == mixxx::track::io::key::INVALID) {
+        return QString();
+    }
+    const QString camelot = KeyUtils::keyToString(
+            key, KeyUtils::KeyNotation::Lancelot);
+    const QString traditional = KeyUtils::keyToString(
+            key, KeyUtils::KeyNotation::Traditional);
+    if (camelot.isEmpty() || traditional.isEmpty()) {
+        return QString();
+    }
+    return QStringLiteral("%1 · %2").arg(camelot, traditional);
+}
+
 BaseTrackTableModel::BaseTrackTableModel(
         QObject* parent,
         TrackCollectionManager* pTrackCollectionManager,
@@ -758,15 +774,10 @@ QVariant BaseTrackTableModel::roleValue(
             bool ok = false;
             const int keyId = keyIdValue.toInt(&ok);
             if (ok) {
-                const auto key = KeyUtils::keyFromNumericValue(keyId);
-                if (key != mixxx::track::io::key::INVALID) {
-                    const QString camelot = KeyUtils::keyToString(
-                            key, KeyUtils::KeyNotation::Lancelot);
-                    const QString traditional = KeyUtils::keyToString(
-                            key, KeyUtils::KeyNotation::Traditional);
-                    if (!camelot.isEmpty() && !traditional.isEmpty()) {
-                        return QStringLiteral("%1 · %2").arg(camelot, traditional);
-                    }
+                const QString dualNotation = formatDualNotationKeyText(
+                        KeyUtils::keyFromNumericValue(keyId));
+                if (!dualNotation.isEmpty()) {
+                    return dualNotation;
                 }
             }
             // No key detected (or unparseable value): preserve existing

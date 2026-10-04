@@ -1,7 +1,9 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <QColor>
 #include <QDebug>
+#include <QSet>
 
 #include "proto/keys.pb.h"
 #include "track/keyutils.h"
@@ -300,4 +302,80 @@ TEST_F(KeyUtilsTest, GetCompatibleKeys) {
                     mixxx::track::io::key::D_MINOR,
                     mixxx::track::io::key::A_MINOR,
                     mixxx::track::io::key::G_MINOR));
+}
+
+// Expected base (minor/"A") colors per Camelot wheel number, from the
+// table in docs/decisions/0002-camelot-key-coloring.md. Index 0 is unused
+// (wheel numbers are 1-12) so the array can be indexed directly.
+constexpr QRgb kExpectedCamelotWheelColor[13] = {
+        0x000000, // unused
+        0xE53935, // 1 - red
+        0xFB8C00, // 2 - orange
+        0xFDD835, // 3 - yellow
+        0xC0CA33, // 4 - lime
+        0x43A047, // 5 - green
+        0x00ACC1, // 6 - teal
+        0x1E88E5, // 7 - blue
+        0x3949AB, // 8 - indigo
+        0x8E24AA, // 9 - purple
+        0xD81B60, // 10 - pink
+        0x6D4C41, // 11 - brown
+        0x546E7A, // 12 - blue-grey
+};
+
+TEST_F(KeyUtilsTest, KeyToCamelotColor_InvalidKeyReturnsInvalidColor) {
+    EXPECT_FALSE(KeyUtils::keyToCamelotColor(mixxx::track::io::key::INVALID).isValid());
+}
+
+TEST_F(KeyUtilsTest, KeyToCamelotColor_MinorKeyMatchesAdrTable) {
+    // Per KeyUtils::keyToString(..., KeyNotation::Lancelot) (verified by the
+    // existing LancelotNotation test above): A_MINOR == "8A",
+    // D_MINOR == "7A", C_SHARP_MINOR == "12A".
+    EXPECT_EQ(QColor(kExpectedCamelotWheelColor[8]),
+            KeyUtils::keyToCamelotColor(mixxx::track::io::key::A_MINOR));
+    EXPECT_EQ(QColor(kExpectedCamelotWheelColor[7]),
+            KeyUtils::keyToCamelotColor(mixxx::track::io::key::D_MINOR));
+    EXPECT_EQ(QColor(kExpectedCamelotWheelColor[12]),
+            KeyUtils::keyToCamelotColor(mixxx::track::io::key::C_SHARP_MINOR));
+}
+
+TEST_F(KeyUtilsTest, KeyToCamelotColor_MajorIsLighterTintOfRelativeMinor) {
+    // A_MINOR == "8A", its relative major C_MAJOR == "8B" (same wheel
+    // number): same base hue, lighter per keyToCamelotColor's documented
+    // .lighter(135).
+    const QColor minorColor = KeyUtils::keyToCamelotColor(mixxx::track::io::key::A_MINOR);
+    const QColor majorColor = KeyUtils::keyToCamelotColor(mixxx::track::io::key::C_MAJOR);
+    EXPECT_EQ(QColor(kExpectedCamelotWheelColor[8]).lighter(135), majorColor);
+    // Major and minor of the same wheel number must be distinguishable.
+    EXPECT_NE(minorColor, majorColor);
+}
+
+TEST_F(KeyUtilsTest, KeyToCamelotColor_AdjacentWheelNumbersAreDistinct) {
+    // Spot-check that neighboring wheel positions (per the ADR table) are
+    // visually distinct colors, not coincidentally identical.
+    // A_MINOR=="8A", E_MINOR=="9A", B_MINOR=="10A", G_MINOR=="6A", D_MINOR=="7A".
+    EXPECT_NE(KeyUtils::keyToCamelotColor(mixxx::track::io::key::A_MINOR),  // 8A
+            KeyUtils::keyToCamelotColor(mixxx::track::io::key::E_MINOR));  // 9A
+    EXPECT_NE(KeyUtils::keyToCamelotColor(mixxx::track::io::key::E_MINOR), // 9A
+            KeyUtils::keyToCamelotColor(mixxx::track::io::key::B_MINOR)); // 10A
+    EXPECT_NE(KeyUtils::keyToCamelotColor(mixxx::track::io::key::G_MINOR),      // 6A
+            KeyUtils::keyToCamelotColor(mixxx::track::io::key::D_MINOR));      // 7A
+}
+
+TEST_F(KeyUtilsTest, KeyToCamelotColor_AllTwelveWheelPositionsAreDistinct) {
+    // Walk all 12 minor keys around the wheel in fifths (A_MINOR == "8A",
+    // per the LancelotNotation test above) and verify each of the 12 base
+    // colors is unique, per the ADR's "distributed around the hue wheel"
+    // intent.
+    mixxx::track::io::key::ChromaticKey key = mixxx::track::io::key::A_MINOR;
+    QSet<QRgb> seenColors;
+    for (int i = 0; i < 12; ++i) {
+        const QColor color = KeyUtils::keyToCamelotColor(key);
+        EXPECT_TRUE(color.isValid());
+        EXPECT_FALSE(seenColors.contains(color.rgb()))
+                << "Duplicate Camelot wheel color at step " << i;
+        seenColors.insert(color.rgb());
+        key = KeyUtils::scaleKeySteps(key, 7); // +7 semitones == next wheel number
+    }
+    EXPECT_EQ(12, seenColors.size());
 }
