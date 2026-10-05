@@ -5,15 +5,17 @@
 // Deliberately free of any ControlObject/QObject dependency so it can be unit
 // tested without a live Mixxx engine (see src/test/automixtransitionmath_test.cpp).
 //
-// Scope (Faza 1.5 MVP, approved by Dan 2026-10-04):
-//  - Fixed 16-bar transition duration, computed from the outgoing deck's BPM.
+// Scope (Faza 1.5 MVP, approved by Dan 2026-10-04; duration revised to 2 bars
+// 2026-10-05 per Dan's live-test feedback -- 16 bars felt far too long):
+//  - Fixed 2-bar transition duration, computed from the outgoing deck's BPM.
 //  - Crossfader: full linear sweep from one deck to the other over the transition.
 //  - EQ: low-frequency ("bass") swap at the exact midpoint of the transition,
 //    not a continuous 3-band sweep and not a filter sweep (both out of scope for v1).
 class AutomixTransitionMath {
   public:
-    // Transition length in bars/beats, per Dan's approved MVP scope.
-    static constexpr double kTransitionBars = 16.0;
+    // Transition length in bars/beats. Revised 16->2 bars 2026-10-05 per
+    // Dan's live-test feedback (8 beats = 2 bars of 4 beats).
+    static constexpr double kTransitionBars = 2.0;
     static constexpr double kBeatsPerBar = 4.0;
 
     // Gain values used for the instantaneous low-band swap. These assume the
@@ -25,7 +27,7 @@ class AutomixTransitionMath {
     static constexpr double kBassUnityGain = 1.0;
     static constexpr double kBassCutGain = 0.0;
 
-    // Returns the transition duration in seconds for a 16-bar transition at
+    // Returns the transition duration in seconds for a 2-bar transition at
     // the given outgoing-deck BPM. Returns -1.0 if bpm is not usable (<= 0),
     // which callers must treat as "refuse to start the transition" (e.g. the
     // outgoing deck has no track loaded/analyzed yet).

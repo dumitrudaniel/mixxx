@@ -91,11 +91,48 @@ void AutomixTransitionController::startTransition(int fromDeckNumber) {
     m_baselineIncomingVolume = incoming.volume.get();
 
     // Tempo matching: reuse Mixxx's own Sync engine rather than building
-    // custom tempo ramping. Make the outgoing deck the explicit sync leader,
-    // then enable sync on the incoming deck so it syncs to that leader.
-    // (SyncLeaderLight::Explicit == 2, see engine/sync/syncable.h.)
+    // custom tempo ramping. Request leader status on the outgoing deck, then
+    // (one tick later, see slotTick()) enable sync on the incoming deck so
+    // it syncs to that leader.
+    //
+    // NOTE on the actual CO semantics (verified in source, not assumed):
+    // SyncControl::slotSyncLeaderEnabledChangeRequest()
+    // (engine/sync/synccontrol.cpp) explicitly disables true
+    // SyncMode::LeaderExplicit for any externally-requested value > 0 --
+    // this is a deliberate upstream workaround for known bugs
+    // (mixxxdj/mixxx#11788), documented right there in the comment next to
+    // it. Writing 2.0 (SyncLeaderLight::Explicit) here does NOT make Mixxx
+    // enter LeaderExplicit; it is coerced into SyncMode::LeaderSoft, exactly
+    // like writing 1.0 would be. We still write 2.0 because that is the
+    // "please make me leader" request the CO is designed to accept --
+    // SyncLeaderLight::Explicit is just its parameter space, not a promise
+    // of what SyncMode results -- but don't assume elsewhere in this file
+    // that the outgoing deck ends up in LeaderExplicit, because it won't.
+    //
+    // NOTE on why incoming's sync_enabled write is deferred to the next tick
+    // instead of being written here, synchronously, right after
+    // syncLeader.set(): both writes are deferred by EngineBuffer until each
+    // channel's own next processSyncRequests() call (because both decks are
+    // playing -- see EngineBuffer::requestSyncMode/requestEnableSync), and
+    // channels are drained in fixed registration order (deck 1 before deck
+    // 2), NOT in the order we call .set(). For the deck1->deck2 direction
+    // that's harmless (deck 1/outgoing drains first and cleanly claims
+    // leadership). For deck2->deck1, deck 1/incoming drains FIRST --
+    // EngineSync::pickLeader() (engine/sync/enginesync.cpp) skips any
+    // non-triggering deck that isn't yet isSynchronized(), so at that moment
+    // it sees only the incoming deck as a candidate and self-elects it as
+    // leader, moments before the outgoing deck's queued request lands and
+    // forcibly demotes it back to Follower. The final state is correct
+    // either way, but the incoming deck's sync COs take two writes
+    // (None -> LeaderSoft -> Follower) within the same audio callback for
+    // that one direction -- a transient a human single-button click never
+    // produces. Waiting a full tick (50ms, several audio buffers) before
+    // touching the incoming deck's sync_enabled guarantees the outgoing
+    // deck's leader request has already landed and stabilized, so
+    // pickLeader() sees it as synchronized immediately and never
+    // self-elects the incoming deck. See docs/decisions/0008 addendum.
     outgoing.syncLeader.set(2.0);
-    incoming.syncEnabled.set(1.0);
+    m_syncHandoffPending = true;
 
     // Write the progress-0 state immediately so the transition starts from a
     // known point and the override baseline below is consistent with what we
@@ -111,6 +148,15 @@ void AutomixTransitionController::startTransition(int fromDeckNumber) {
 void AutomixTransitionController::slotTick() {
     if (!m_active) {
         return;
+    }
+
+    if (m_syncHandoffPending) {
+        // See startTransition() for why this is deferred to here (one tick
+        // after requesting leader status on the outgoing deck) instead of
+        // being written synchronously in the same call.
+        DeckControls& incoming = (m_fromDeckNumber == 1) ? m_deck2 : m_deck1;
+        incoming.syncEnabled.set(1.0);
+        m_syncHandoffPending = false;
     }
 
     if (wasManuallyOverridden()) {
@@ -177,6 +223,7 @@ void AutomixTransitionController::finishTransition() {
     m_timer.stop();
     m_active = false;
     m_fromDeckNumber = 0;
+    m_syncHandoffPending = false;
 }
 
 void AutomixTransitionController::cancelTransition(const char* reason) {
@@ -187,4 +234,5 @@ void AutomixTransitionController::cancelTransition(const char* reason) {
     m_timer.stop();
     m_active = false;
     m_fromDeckNumber = 0;
+    m_syncHandoffPending = false;
 }

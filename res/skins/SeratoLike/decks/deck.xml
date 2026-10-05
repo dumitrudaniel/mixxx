@@ -10,7 +10,7 @@
   <!-- MaximumSize crescut 180->200 (2026-10-05): headroom pentru butonul
   MIX>/<MIX (16px) + spacer adaugat sub fader-ul de volum in Faza 1.5
   (channel_left.xml/channel_right.xml). NU a fost cauza reala a butonului
-  invizibil - aia a fost un "--" ilegal intr-un comentariu XML din
+  invizibil - aia a fost un dublu-cratima ilegal intr-un comentariu XML din
   channel_left.xml care stricea tot parsing-ul template-ului (vezi ADR 0008
   addendum). Pastrat oricum ca buget sanatos acum ca butonul chiar ocupa
   spatiu real. -->

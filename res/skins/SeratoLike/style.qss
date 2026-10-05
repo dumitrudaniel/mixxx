@@ -1045,3 +1045,17 @@ WLibrarySidebar {
 #Border58 {
   border: 1px solid #585858;
 }
+
+/* Faza 1.5: butonul de automix era prea discret (text simplu, fara fundal -
+   BtnType gol = transparent, vezi button_1state.xml). Fundal plin + text bold
+   ca sa iasa clar in evidenta in mixer. */
+#AutomixTransitionButton1, #AutomixTransitionButton2 {
+  background-color: #ff8800;
+  color: #000000;
+  font-weight: bold;
+  border: 1px solid #ffaa33;
+  border-radius: 2px;
+}
+#AutomixTransitionButton1:pressed, #AutomixTransitionButton2:pressed {
+  background-color: #ffaa33;
+}

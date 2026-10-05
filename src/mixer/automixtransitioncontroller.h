@@ -19,7 +19,7 @@
 // presses one of the two trigger buttons it exposes.
 //
 // Explicitly out of scope for this MVP (Dan's approval, 2026-10-04):
-//  - Duration selection (hardcoded 16 bars).
+//  - Duration selection (hardcoded 2 bars as of 2026-10-05, was 16 bars).
 //  - Filter sweep.
 //  - Any brain/ (Python) involvement -- this lives entirely inside Mixxx.
 //
@@ -83,6 +83,14 @@ class AutomixTransitionController : public QObject {
     bool m_active = false;
     int m_fromDeckNumber = 0; // 1 or 2 while active, 0 when idle
     double m_durationSeconds = 0.0;
+
+    // See automixtransitioncontroller.cpp (startTransition) for why this
+    // exists: enabling sync on the incoming deck is deferred by one tick
+    // (50ms) after requesting leader status on the outgoing deck, instead of
+    // writing both COs back-to-back in the same call, to avoid a real
+    // cross-channel race in Mixxx's own EngineSync::pickLeader() that is
+    // direction-dependent (only occurs for the deck2->deck1 transition).
+    bool m_syncHandoffPending = false;
 
     // Last values *this class* wrote, for manual-override detection.
     double m_lastWrittenCrossfader = 0.0;
