@@ -163,6 +163,17 @@ void WOverview::setup(const QDomNode& node, const SkinContext& context) {
         m_endOfTrackColor = WSkinColor::getCorrectColor(m_endOfTrackColor);
     }
 
+    // Mini beatgrid tick color for this overview widget (ADR 0016). Falls
+    // back to a light grey that reads clearly against dark overview
+    // backgrounds, in the same spirit as the main waveform's BeatColor
+    // (WaveformRenderBeat), if the skin does not configure one.
+    m_beatTickColor = QColor(0xC8, 0xC8, 0xC8);
+    const QString beatTickColorName = context.selectString(node, "BeatTickColor");
+    if (!beatTickColorName.isNull()) {
+        m_beatTickColor = QColor(beatTickColorName);
+        m_beatTickColor = WSkinColor::getCorrectColor(m_beatTickColor);
+    }
+
     // setup hotcues and cue and loop(s)
     m_marks.setup(m_group, node, context, m_signalColors);
 
@@ -667,7 +678,13 @@ void WOverview::paintEvent(QPaintEvent* pEvent) {
         // ScopePainter.
         drawEndOfTrackBackground(&painter);
         drawAxis(&painter);
-        drawWaveformPixmap(&painter);
+        // Per ADR 0016 (mini-overview beat ticks), this small widget does
+        // not need to show the real waveform shape/amplitude at all -- a
+        // minimal beat-tick indicator is sufficient, so the amplitude
+        // pixmap is intentionally not drawn here anymore (was
+        // drawWaveformPixmap(&painter)). The played/unplayed overlay, play
+        // position, cue/loop marks and analyzer progress stay intact since
+        // those remain functionally important for cue/loop work.
         drawPlayedOverlay(&painter);
         drawPlayPosition(&painter);
         drawEndOfTrackFrame(&painter);
@@ -679,6 +696,7 @@ void WOverview::paintEvent(QPaintEvent* pEvent) {
             const auto gain = static_cast<CSAMPLE_GAIN>(length() - 2) /
                     static_cast<CSAMPLE_GAIN>(trackSamples);
 
+            drawBeatTicks(&painter, offset, gain);
             drawRangeMarks(&painter, offset, gain);
             drawMarks(&painter, offset, gain);
             drawPickupPosition(&painter);
@@ -747,6 +765,73 @@ void WOverview::drawWaveformPixmap(QPainter* pPainter) {
         }
 
         pPainter->drawImage(rect(), m_waveformImageScaled);
+    }
+}
+
+void WOverview::drawBeatTicks(QPainter* pPainter, const float offset, const float gain) {
+    // Mini beatgrid for this small overview widget (ADR 0016). Dan does not
+    // need to see the real waveform shape here, just a minimal indicator of
+    // beat positions, so we draw short ticks instead -- same spirit as
+    // phase_strip.xml (ADR 0006) but implemented in C++ since WOverview has
+    // no skin-level equivalent of that trick.
+    if (!m_pCurrentTrack) {
+        return;
+    }
+
+    mixxx::BeatsPointer pBeats = m_pCurrentTrack->getBeats();
+    if (!pBeats) {
+        // No analyzed beatgrid: no-op, same precedent as ADR 0005/0006.
+        return;
+    }
+
+    const double trackSamples = getTrackSamples();
+    if (trackSamples <= 0) {
+        return;
+    }
+
+    PainterScope painterScope(pPainter);
+    QPen beatTickPen(m_beatTickColor);
+    beatTickPen.setWidthF(std::max(1.0, static_cast<double>(m_scaleFactor)));
+    pPainter->setPen(beatTickPen);
+
+    // Thin, near-full-height lines read as a clean "mini beatgrid" without
+    // leaving an odd blank gap in the middle of the widget the way a
+    // top/bottom-only tick would.
+    //
+    // At this widget's scale a whole track is compressed into a couple
+    // hundred pixels, so consecutive beats are frequently much closer
+    // together than one pixel (e.g. a 3-4 minute track at ~105 BPM has
+    // 300-400+ beats to show). Drawing every single one on top of each
+    // other produces dense hatching/noise, not discrete ticks. Decluttering
+    // to a minimum pixel spacing keeps the ticks small and clean -- beats
+    // that are not individually distinguishable at this scale cannot be
+    // meaningfully shown as separate marks anyway.
+    const float minTickSpacing = std::max(3.0f, 2.0f * static_cast<float>(m_scaleFactor));
+
+    const auto startPosition = mixxx::audio::FramePos::fromEngineSamplePos(0.0);
+    const auto endPosition =
+            mixxx::audio::FramePos::fromEngineSamplePos(trackSamples);
+
+    float lastTickPosition = -minTickSpacing;
+    for (auto it = pBeats->iteratorFrom(startPosition);
+            it != pBeats->cend() && *it <= endPosition;
+            ++it) {
+        const double beatPosition = it->toEngineSamplePos();
+        const float tickPosition = math_clamp(
+                offset + static_cast<float>(beatPosition) * gain,
+                0.0f,
+                static_cast<float>(length()));
+
+        if (tickPosition - lastTickPosition < minTickSpacing) {
+            continue;
+        }
+        lastTickPosition = tickPosition;
+
+        if (m_orientation == Qt::Horizontal) {
+            pPainter->drawLine(QPointF(tickPosition, 0.0), QPointF(tickPosition, height()));
+        } else {
+            pPainter->drawLine(QPointF(0.0, tickPosition), QPointF(width(), tickPosition));
+        }
     }
 }
 

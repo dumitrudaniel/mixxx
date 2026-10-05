@@ -93,6 +93,7 @@ class WOverview : public WWidget, public TrackDropTarget {
     void drawEndOfTrackBackground(QPainter* pPainter);
     void drawAxis(QPainter* pPainter);
     void drawWaveformPixmap(QPainter* pPainter);
+    void drawBeatTicks(QPainter* pPainter, const float offset, const float gain);
     void drawPlayedOverlay(QPainter* pPainter);
     void drawPlayPosition(QPainter* pPainter);
     void drawEndOfTrackFrame(QPainter* pPainter);
@@ -217,6 +218,7 @@ class WOverview : public WWidget, public TrackDropTarget {
     QColor m_passthroughOverlayColor;
     QColor m_playedOverlayColor;
     QColor m_lowColor;
+    QColor m_beatTickColor;
     int m_dimBrightThreshold;
     parented_ptr<QLabel> m_pPassthroughLabel;
 
