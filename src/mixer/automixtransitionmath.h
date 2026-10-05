@@ -8,11 +8,17 @@
 // Scope (Faza 1.5 MVP, approved by Dan 2026-10-04; duration revised to 2 bars
 // 2026-10-05 per Dan's live-test feedback -- 16 bars felt far too long; 3-band
 // continuous EQ + filter sweep added 2026-10-05, replacing the original
-// instant-bass-swap-only MVP -- see docs/decisions/0008 addendum):
+// instant-bass-swap-only MVP; bass-band staggering re-added 2026-10-05 (second
+// addendum same day) after Dan reported the all-bands-identical-rate version
+// felt mechanical -- see docs/decisions/0008 addenda):
 //  - Fixed 2-bar transition duration, computed from the outgoing deck's BPM.
 //  - Crossfader: full linear sweep from one deck to the other over the transition.
-//  - EQ: all three bands (low/mid/high) fade continuously and linearly over
-//    the WHOLE transition (not an instant swap at the midpoint anymore).
+//  - EQ: the low band swaps on its OWN faster, front-loaded curve (complete by
+//    60% of the transition -- see outgoing/incomingBassGainForProgress), while
+//    mid/high fade continuously and linearly over the WHOLE transition (see
+//    outgoing/incomingEqGainForProgress) -- standard DJ technique: swap bass
+//    quickly to avoid low-end mud between two full-bass tracks, blend mid/high
+//    gradually for a smooth, non-abrupt tonal transition.
 //  - Filter: each deck's single "Filter" (quick-effect) knob sweeps linearly
 //    over the whole transition, in complementary directions per deck.
 class AutomixTransitionMath {
@@ -31,6 +37,16 @@ class AutomixTransitionMath {
     // judgment call carried over from the original MVP (see docs/decisions/0008).
     static constexpr double kEqUnityGain = 1.0;
     static constexpr double kEqCutGain = 0.0;
+
+    // Low-band-specific stagger: real DJ mixing swaps bass fast/early (full
+    // bass clash between two tracks is unpleasant even briefly), while
+    // letting mid/high blend across the whole transition. The low band
+    // completes its own swap by 60% of total progress, then holds; mid/high
+    // keep using the full-duration curve above. Chosen as a clean, simple
+    // piecewise-linear fraction -- not a cifră cerută explicit de Dan, doar
+    // o alegere de judecată documentată; de ajustat dintr-o singură
+    // constantă dacă bass swap-ul sună prea rapid/lent la testare live.
+    static constexpr double kBassSwapFraction = 0.6;
 
     // Quick-filter ("Filter" knob) sweep range, via the
     // [QuickEffectRack1_[ChannelN]],super1 ControlPotmeter. Confirmed in
@@ -61,14 +77,22 @@ class AutomixTransitionMath {
     static double crossfaderForProgress(double progress, bool fromDeck1ToDeck2);
 
     // EQ gain for the outgoing/incoming deck at a given progress in [0, 1].
-    // Used identically for the low, mid and high bands -- all three bands
-    // move together, so one function covers all of them (unlike the
-    // superseded MVP, which only touched the low band, and did so as an
-    // instant swap at progress == 0.5). Linear: outgoing fades unity(1.0) ->
+    // Used for the MID and HIGH bands only as of 2026-10-05 (low band now has
+    // its own faster curve below). Linear: outgoing fades unity(1.0) ->
     // cut(0.0), incoming fades cut(0.0) -> unity(1.0), over the WHOLE
     // transition, matching crossfaderForProgress's own linear curve.
     static double outgoingEqGainForProgress(double progress);
     static double incomingEqGainForProgress(double progress);
+
+    // Low-band-only EQ gain, front-loaded: the swap completes by
+    // kBassSwapFraction (60%) of progress, then holds at the end value for
+    // the remainder of the transition. Outgoing fades unity(1.0) -> cut(0.0)
+    // over [0, kBassSwapFraction], then stays at cut. Incoming fades
+    // cut(0.0) -> unity(1.0) over the same window, then stays at unity.
+    // Complementary throughout (sums to 1.0 at every progress), same as the
+    // mid/high curve, just compressed into the first 60% of the duration.
+    static double outgoingBassGainForProgress(double progress);
+    static double incomingBassGainForProgress(double progress);
 
     // Quick-filter sweep for the outgoing/incoming deck at a given progress
     // in [0, 1]. Linear, same curve shape as the EQ/crossfader functions.

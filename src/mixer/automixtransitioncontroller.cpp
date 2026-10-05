@@ -154,8 +154,10 @@ void AutomixTransitionController::startTransition(int fromDeckNumber) {
     // known point and the override baseline below is consistent with what we
     // just wrote.
     writeCrossfader(AutomixTransitionMath::crossfaderForProgress(0.0, fromDeckNumber == 1));
-    writeOutgoingEq(AutomixTransitionMath::outgoingEqGainForProgress(0.0));
-    writeIncomingEq(AutomixTransitionMath::incomingEqGainForProgress(0.0));
+    writeOutgoingEq(AutomixTransitionMath::outgoingEqGainForProgress(0.0),
+            AutomixTransitionMath::outgoingBassGainForProgress(0.0));
+    writeIncomingEq(AutomixTransitionMath::incomingEqGainForProgress(0.0),
+            AutomixTransitionMath::incomingBassGainForProgress(0.0));
     writeOutgoingFilter(AutomixTransitionMath::outgoingFilterForProgress(0.0));
     writeIncomingFilter(AutomixTransitionMath::incomingFilterForProgress(0.0));
 
@@ -188,8 +190,10 @@ void AutomixTransitionController::slotTick() {
 
     const bool fromDeck1 = (m_fromDeckNumber == 1);
     writeCrossfader(AutomixTransitionMath::crossfaderForProgress(progress, fromDeck1));
-    writeOutgoingEq(AutomixTransitionMath::outgoingEqGainForProgress(progress));
-    writeIncomingEq(AutomixTransitionMath::incomingEqGainForProgress(progress));
+    writeOutgoingEq(AutomixTransitionMath::outgoingEqGainForProgress(progress),
+            AutomixTransitionMath::outgoingBassGainForProgress(progress));
+    writeIncomingEq(AutomixTransitionMath::incomingEqGainForProgress(progress),
+            AutomixTransitionMath::incomingBassGainForProgress(progress));
     writeOutgoingFilter(AutomixTransitionMath::outgoingFilterForProgress(progress));
     writeIncomingFilter(AutomixTransitionMath::incomingFilterForProgress(progress));
 
@@ -205,14 +209,14 @@ bool AutomixTransitionController::wasManuallyOverridden() const {
     if (diverged(m_crossfader.get(), m_lastWrittenCrossfader)) {
         return true;
     }
-    if (diverged(outgoing.eqLowGain.get(), m_lastWrittenOutgoingEq) ||
-            diverged(outgoing.eqMidGain.get(), m_lastWrittenOutgoingEq) ||
-            diverged(outgoing.eqHighGain.get(), m_lastWrittenOutgoingEq)) {
+    if (diverged(outgoing.eqLowGain.get(), m_lastWrittenOutgoingBass) ||
+            diverged(outgoing.eqMidGain.get(), m_lastWrittenOutgoingEqMidHigh) ||
+            diverged(outgoing.eqHighGain.get(), m_lastWrittenOutgoingEqMidHigh)) {
         return true;
     }
-    if (diverged(incoming.eqLowGain.get(), m_lastWrittenIncomingEq) ||
-            diverged(incoming.eqMidGain.get(), m_lastWrittenIncomingEq) ||
-            diverged(incoming.eqHighGain.get(), m_lastWrittenIncomingEq)) {
+    if (diverged(incoming.eqLowGain.get(), m_lastWrittenIncomingBass) ||
+            diverged(incoming.eqMidGain.get(), m_lastWrittenIncomingEqMidHigh) ||
+            diverged(incoming.eqHighGain.get(), m_lastWrittenIncomingEqMidHigh)) {
         return true;
     }
     if (diverged(outgoing.filter.get(), m_lastWrittenOutgoingFilter)) {
@@ -237,20 +241,22 @@ void AutomixTransitionController::writeCrossfader(double value) {
     m_lastWrittenCrossfader = value;
 }
 
-void AutomixTransitionController::writeOutgoingEq(double value) {
+void AutomixTransitionController::writeOutgoingEq(double midHighValue, double bassValue) {
     DeckControls& outgoing = (m_fromDeckNumber == 1) ? m_deck1 : m_deck2;
-    outgoing.eqLowGain.set(value);
-    outgoing.eqMidGain.set(value);
-    outgoing.eqHighGain.set(value);
-    m_lastWrittenOutgoingEq = value;
+    outgoing.eqLowGain.set(bassValue);
+    outgoing.eqMidGain.set(midHighValue);
+    outgoing.eqHighGain.set(midHighValue);
+    m_lastWrittenOutgoingEqMidHigh = midHighValue;
+    m_lastWrittenOutgoingBass = bassValue;
 }
 
-void AutomixTransitionController::writeIncomingEq(double value) {
+void AutomixTransitionController::writeIncomingEq(double midHighValue, double bassValue) {
     DeckControls& incoming = (m_fromDeckNumber == 1) ? m_deck2 : m_deck1;
-    incoming.eqLowGain.set(value);
-    incoming.eqMidGain.set(value);
-    incoming.eqHighGain.set(value);
-    m_lastWrittenIncomingEq = value;
+    incoming.eqLowGain.set(bassValue);
+    incoming.eqMidGain.set(midHighValue);
+    incoming.eqHighGain.set(midHighValue);
+    m_lastWrittenIncomingEqMidHigh = midHighValue;
+    m_lastWrittenIncomingBass = bassValue;
 }
 
 void AutomixTransitionController::writeOutgoingFilter(double value) {

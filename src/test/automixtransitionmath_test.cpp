@@ -86,6 +86,57 @@ TEST_F(AutomixTransitionMathTest, EqGainForProgress_ClampsOutOfRangeProgress) {
     EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::incomingEqGainForProgress(1.5));
 }
 
+// --- Low-band-only bass swap curve (re-added 2026-10-05, second addendum
+// same day): front-loaded, completes by kBassSwapFraction (0.6) of
+// progress, then holds -- unlike the mid/high curve above, which spans the
+// whole [0,1] range. ---
+
+TEST_F(AutomixTransitionMathTest, OutgoingBassGainForProgress_FrontLoadedThenHolds) {
+    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::outgoingBassGainForProgress(0.0));
+    // Halfway through the 0.6 swap window (progress 0.3): halfway faded.
+    EXPECT_DOUBLE_EQ(0.5, AutomixTransitionMath::outgoingBassGainForProgress(0.3));
+    // Swap complete exactly at kBassSwapFraction.
+    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::outgoingBassGainForProgress(0.6));
+    // Holds at cut for the remainder of the transition.
+    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::outgoingBassGainForProgress(0.8));
+    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::outgoingBassGainForProgress(1.0));
+}
+
+TEST_F(AutomixTransitionMathTest, IncomingBassGainForProgress_FrontLoadedThenHolds) {
+    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::incomingBassGainForProgress(0.0));
+    EXPECT_DOUBLE_EQ(0.5, AutomixTransitionMath::incomingBassGainForProgress(0.3));
+    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::incomingBassGainForProgress(0.6));
+    // Holds at unity for the remainder of the transition.
+    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::incomingBassGainForProgress(0.8));
+    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::incomingBassGainForProgress(1.0));
+}
+
+TEST_F(AutomixTransitionMathTest, BassGainForProgress_AlwaysSumsToUnity) {
+    for (double progress = 0.0; progress <= 1.0; progress += 0.1) {
+        const double outgoing = AutomixTransitionMath::outgoingBassGainForProgress(progress);
+        const double incoming = AutomixTransitionMath::incomingBassGainForProgress(progress);
+        EXPECT_NEAR(1.0, outgoing + incoming, 1e-9);
+    }
+}
+
+TEST_F(AutomixTransitionMathTest, BassGainForProgress_ClampsOutOfRangeProgress) {
+    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::outgoingBassGainForProgress(-0.5));
+    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::outgoingBassGainForProgress(1.5));
+    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::incomingBassGainForProgress(-0.5));
+    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::incomingBassGainForProgress(1.5));
+}
+
+TEST_F(AutomixTransitionMathTest, BassGainForProgress_SwapsFasterThanMidHighEq) {
+    // At progress 0.8 (past the bass swap window but before the mid/high
+    // fade completes), bass must already be fully swapped while mid/high is
+    // still mid-fade -- this is the whole point of the staggering.
+    const double bassOutgoing = AutomixTransitionMath::outgoingBassGainForProgress(0.8);
+    const double eqOutgoing = AutomixTransitionMath::outgoingEqGainForProgress(0.8);
+    EXPECT_DOUBLE_EQ(0.0, bassOutgoing);
+    EXPECT_DOUBLE_EQ(0.2, eqOutgoing);
+    EXPECT_LT(bassOutgoing, eqOutgoing);
+}
+
 // --- Filter ("Filter" knob / super1) sweep (added 2026-10-05). ---
 
 TEST_F(AutomixTransitionMathTest, OutgoingFilterForProgress_SweepsNeutralToHighPassEnd) {

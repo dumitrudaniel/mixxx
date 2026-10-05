@@ -41,6 +41,26 @@ double AutomixTransitionMath::incomingEqGainForProgress(double progress) {
 }
 
 // static
+double AutomixTransitionMath::outgoingBassGainForProgress(double progress) {
+    const double clamped = std::clamp(progress, 0.0, 1.0);
+    if (clamped >= kBassSwapFraction) {
+        return kEqCutGain;
+    }
+    const double windowFraction = clamped / kBassSwapFraction;
+    return kEqUnityGain + windowFraction * (kEqCutGain - kEqUnityGain);
+}
+
+// static
+double AutomixTransitionMath::incomingBassGainForProgress(double progress) {
+    const double clamped = std::clamp(progress, 0.0, 1.0);
+    if (clamped >= kBassSwapFraction) {
+        return kEqUnityGain;
+    }
+    const double windowFraction = clamped / kBassSwapFraction;
+    return kEqCutGain + windowFraction * (kEqUnityGain - kEqCutGain);
+}
+
+// static
 double AutomixTransitionMath::outgoingFilterForProgress(double progress) {
     const double clamped = std::clamp(progress, 0.0, 1.0);
     return kFilterNeutral + clamped * (kFilterOutgoingEnd - kFilterNeutral);
