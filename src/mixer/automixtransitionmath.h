@@ -7,20 +7,36 @@
 //
 // Scope (Faza 1.5 MVP, approved by Dan 2026-10-04; duration revised to 2 bars
 // 2026-10-05 per Dan's live-test feedback -- 16 bars felt far too long; 3-band
-// continuous EQ + filter sweep added 2026-10-05, replacing the original
-// instant-bass-swap-only MVP; bass-band staggering re-added 2026-10-05 (second
-// addendum same day) after Dan reported the all-bands-identical-rate version
-// felt mechanical -- see docs/decisions/0008 addenda):
+// continuous EQ + filter sweep added 2026-10-05, then the mid/high portion of
+// that EQ fade REMOVED again later the same day after Dan reported a volume
+// "jump" around the transition midpoint -- see docs/decisions/0008 addenda,
+// specifically the 2026-10-05 "double-attenuation" addendum):
 //  - Fixed 2-bar transition duration, computed from the outgoing deck's BPM.
-//  - Crossfader: full linear sweep from one deck to the other over the transition.
-//  - EQ: the low band swaps on its OWN faster, front-loaded curve (complete by
-//    60% of the transition -- see outgoing/incomingBassGainForProgress), while
-//    mid/high fade continuously and linearly over the WHOLE transition (see
-//    outgoing/incomingEqGainForProgress) -- standard DJ technique: swap bass
-//    quickly to avoid low-end mud between two full-bass tracks, blend mid/high
-//    gradually for a smooth, non-abrupt tonal transition.
+//  - Crossfader: full linear sweep from one deck to the other over the
+//    transition. This is the SOLE primary volume blend between the two decks
+//    (constant-power curve, configured at the Mixxx [Mixer Profile] level --
+//    see the crossfader-curve addendum). Nothing else in this class should
+//    ride a second full attenuation-equivalent fade on top of it.
+//  - EQ: ONLY the low band is automated, on its own faster, front-loaded
+//    curve (complete by 60% of the transition -- see outgoing/
+//    incomingBassGainForProgress) -- standard DJ technique: swap bass
+//    quickly to avoid low-end mud between two full-bass tracks, a problem
+//    that exists regardless of the decks' relative crossfader volume (both
+//    basslines are present simultaneously for part of the transition no
+//    matter what). Mid/high bands are deliberately left untouched (held at
+//    unity gain) for the whole transition: letting the crossfader alone
+//    carry their presence avoids the double-attenuation bug (crossfader
+//    gain x EQ gain compounding multiplicatively, producing a real ~6dB dip
+//    in combined loudness at progress=0.5 that read as a "jump" on the way
+//    back up). Mid/high EQ automation was previously a continuous linear
+//    fade identical in shape to the bass curve but spanning the whole
+//    transition (outgoing/incomingEqGainForProgress, now removed); that
+//    function pair is gone, not just unused.
 //  - Filter: each deck's single "Filter" (quick-effect) knob sweeps linearly
-//    over the whole transition, in complementary directions per deck.
+//    over the whole transition, in complementary directions per deck. This
+//    is tonal/spectral shaping (cutoff frequency), not a volume multiplier,
+//    so it is unaffected by the double-attenuation issue above and was left
+//    unchanged.
 class AutomixTransitionMath {
   public:
     // Transition length in bars/beats. Revised 16->2 bars 2026-10-05 per
@@ -28,13 +44,15 @@ class AutomixTransitionMath {
     static constexpr double kTransitionBars = 2.0;
     static constexpr double kBeatsPerBar = 4.0;
 
-    // Gain values used for the EQ fade, identical for all three bands (low/
-    // mid/high). These assume the default Mixxx EQ effect's gain parameter is
-    // unity (no boost/cut) at 1.0 and fully cut at 0.0 -- confirmed by
-    // reading the EQ knob wiring in res/skins/SeratoLike/mixer/eq_knob_left.xml
-    // (parameter1/2/3 == Low/Mid/High respectively), but the *neutral==1.0 /
-    // cut==0.0* assumption about the effect's own gain curve is a documented
-    // judgment call carried over from the original MVP (see docs/decisions/0008).
+    // Gain values used for the low-band (bass) swap curve below. These
+    // assume the default Mixxx EQ effect's gain parameter is unity (no
+    // boost/cut) at 1.0 and fully cut at 0.0 -- confirmed by reading the EQ
+    // knob wiring in res/skins/SeratoLike/mixer/eq_knob_left.xml (parameter1
+    // == Low), but the *neutral==1.0 / cut==0.0* assumption about the
+    // effect's own gain curve is a documented judgment call carried over
+    // from the original MVP (see docs/decisions/0008). Mid/high bands are no
+    // longer automated at all (left at unity gain, never written by this
+    // class) -- see the double-attenuation addendum, 2026-10-05.
     static constexpr double kEqUnityGain = 1.0;
     static constexpr double kEqCutGain = 0.0;
 
@@ -75,14 +93,6 @@ class AutomixTransitionMath {
     // deck 2) for a given progress in [0, 1]. `fromDeck1ToDeck2` selects the
     // sweep direction.
     static double crossfaderForProgress(double progress, bool fromDeck1ToDeck2);
-
-    // EQ gain for the outgoing/incoming deck at a given progress in [0, 1].
-    // Used for the MID and HIGH bands only as of 2026-10-05 (low band now has
-    // its own faster curve below). Linear: outgoing fades unity(1.0) ->
-    // cut(0.0), incoming fades cut(0.0) -> unity(1.0), over the WHOLE
-    // transition, matching crossfaderForProgress's own linear curve.
-    static double outgoingEqGainForProgress(double progress);
-    static double incomingEqGainForProgress(double progress);
 
     // Low-band-only EQ gain, front-loaded: the swap completes by
     // kBassSwapFraction (60%) of progress, then holds at the end value for

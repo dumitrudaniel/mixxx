@@ -49,42 +49,14 @@ TEST_F(AutomixTransitionMathTest, CrossfaderForProgress_Deck2ToDeck1SweepIsRever
     EXPECT_DOUBLE_EQ(-1.0, AutomixTransitionMath::crossfaderForProgress(1.0, false));
 }
 
-// --- EQ gain (low/mid/high, all identical) -- continuous linear fade,
-// replacing the old instant-swap-at-midpoint behavior (2026-10-05). ---
-
-TEST_F(AutomixTransitionMathTest, OutgoingEqGainForProgress_FadesUnityToCut) {
-    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::outgoingEqGainForProgress(0.0));
-    EXPECT_DOUBLE_EQ(0.75, AutomixTransitionMath::outgoingEqGainForProgress(0.25));
-    EXPECT_DOUBLE_EQ(0.5, AutomixTransitionMath::outgoingEqGainForProgress(0.5));
-    EXPECT_DOUBLE_EQ(0.25, AutomixTransitionMath::outgoingEqGainForProgress(0.75));
-    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::outgoingEqGainForProgress(1.0));
-}
-
-TEST_F(AutomixTransitionMathTest, IncomingEqGainForProgress_FadesCutToUnity) {
-    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::incomingEqGainForProgress(0.0));
-    EXPECT_DOUBLE_EQ(0.25, AutomixTransitionMath::incomingEqGainForProgress(0.25));
-    EXPECT_DOUBLE_EQ(0.5, AutomixTransitionMath::incomingEqGainForProgress(0.5));
-    EXPECT_DOUBLE_EQ(0.75, AutomixTransitionMath::incomingEqGainForProgress(0.75));
-    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::incomingEqGainForProgress(1.0));
-}
-
-TEST_F(AutomixTransitionMathTest, EqGainForProgress_AlwaysSumsToUnity) {
-    // Continuous crossfade: at every point the two gains sum to exactly 1.0
-    // (unlike the old instant-swap MVP, which kept both at their endpoints
-    // until the midpoint).
-    for (double progress = 0.0; progress <= 1.0; progress += 0.1) {
-        const double outgoing = AutomixTransitionMath::outgoingEqGainForProgress(progress);
-        const double incoming = AutomixTransitionMath::incomingEqGainForProgress(progress);
-        EXPECT_NEAR(1.0, outgoing + incoming, 1e-9);
-    }
-}
-
-TEST_F(AutomixTransitionMathTest, EqGainForProgress_ClampsOutOfRangeProgress) {
-    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::outgoingEqGainForProgress(-0.5));
-    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::outgoingEqGainForProgress(1.5));
-    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::incomingEqGainForProgress(-0.5));
-    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::incomingEqGainForProgress(1.5));
-}
+// --- Mid/high EQ gain fade REMOVED 2026-10-05 (double-attenuation addendum):
+// it rode a second full attenuation-equivalent fade on top of the
+// (constant-power) crossfader, compounding multiplicatively and producing a
+// real volume dip at the midpoint that read as a "jump" on recovery. Mid/
+// high bands are now left untouched (unity gain) for the whole transition --
+// the crossfader alone carries their presence. The OutgoingEqGainForProgress/
+// IncomingEqGainForProgress tests that used to live here, and the function
+// pair itself, are gone, not just unused. ---
 
 // --- Low-band-only bass swap curve (re-added 2026-10-05, second addendum
 // same day): front-loaded, completes by kBassSwapFraction (0.6) of
@@ -124,17 +96,6 @@ TEST_F(AutomixTransitionMathTest, BassGainForProgress_ClampsOutOfRangeProgress) 
     EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::outgoingBassGainForProgress(1.5));
     EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::incomingBassGainForProgress(-0.5));
     EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::incomingBassGainForProgress(1.5));
-}
-
-TEST_F(AutomixTransitionMathTest, BassGainForProgress_SwapsFasterThanMidHighEq) {
-    // At progress 0.8 (past the bass swap window but before the mid/high
-    // fade completes), bass must already be fully swapped while mid/high is
-    // still mid-fade -- this is the whole point of the staggering.
-    const double bassOutgoing = AutomixTransitionMath::outgoingBassGainForProgress(0.8);
-    const double eqOutgoing = AutomixTransitionMath::outgoingEqGainForProgress(0.8);
-    EXPECT_DOUBLE_EQ(0.0, bassOutgoing);
-    EXPECT_DOUBLE_EQ(0.2, eqOutgoing);
-    EXPECT_LT(bassOutgoing, eqOutgoing);
 }
 
 // --- Filter ("Filter" knob / super1) sweep (added 2026-10-05). ---
