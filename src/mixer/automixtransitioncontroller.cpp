@@ -47,8 +47,7 @@ AutomixTransitionController::DeckControls::DeckControls(const QString& group)
           // NOT the 3-band EQ knobs above.
           filter(QStringLiteral("[QuickEffectRack1_") + group + QStringLiteral("]"),
                   QStringLiteral("super1")),
-          syncEnabled(group, QStringLiteral("sync_enabled")),
-          syncLeader(group, QStringLiteral("sync_leader")) {
+          rateRatio(group, QStringLiteral("rate_ratio")) {
 }
 
 AutomixTransitionController::AutomixTransitionController(QObject* pParent)
@@ -109,49 +108,31 @@ void AutomixTransitionController::startTransition(int fromDeckNumber) {
     m_baselineOutgoingVolume = outgoing.volume.get();
     m_baselineIncomingVolume = incoming.volume.get();
 
-    // Tempo matching: reuse Mixxx's own Sync engine rather than building
-    // custom tempo ramping. Request leader status on the outgoing deck, then
-    // (one tick later, see slotTick()) enable sync on the incoming deck so
-    // it syncs to that leader.
-    //
-    // NOTE on the actual CO semantics (verified in source, not assumed):
-    // SyncControl::slotSyncLeaderEnabledChangeRequest()
-    // (engine/sync/synccontrol.cpp) explicitly disables true
-    // SyncMode::LeaderExplicit for any externally-requested value > 0 --
-    // this is a deliberate upstream workaround for known bugs
-    // (mixxxdj/mixxx#11788), documented right there in the comment next to
-    // it. Writing 2.0 (SyncLeaderLight::Explicit) here does NOT make Mixxx
-    // enter LeaderExplicit; it is coerced into SyncMode::LeaderSoft, exactly
-    // like writing 1.0 would be. We still write 2.0 because that is the
-    // "please make me leader" request the CO is designed to accept --
-    // SyncLeaderLight::Explicit is just its parameter space, not a promise
-    // of what SyncMode results -- but don't assume elsewhere in this file
-    // that the outgoing deck ends up in LeaderExplicit, because it won't.
-    //
-    // NOTE on why incoming's sync_enabled write is deferred to the next tick
-    // instead of being written here, synchronously, right after
-    // syncLeader.set(): both writes are deferred by EngineBuffer until each
-    // channel's own next processSyncRequests() call (because both decks are
-    // playing -- see EngineBuffer::requestSyncMode/requestEnableSync), and
-    // channels are drained in fixed registration order (deck 1 before deck
-    // 2), NOT in the order we call .set(). For the deck1->deck2 direction
-    // that's harmless (deck 1/outgoing drains first and cleanly claims
-    // leadership). For deck2->deck1, deck 1/incoming drains FIRST --
-    // EngineSync::pickLeader() (engine/sync/enginesync.cpp) skips any
-    // non-triggering deck that isn't yet isSynchronized(), so at that moment
-    // it sees only the incoming deck as a candidate and self-elects it as
-    // leader, moments before the outgoing deck's queued request lands and
-    // forcibly demotes it back to Follower. The final state is correct
-    // either way, but the incoming deck's sync COs take two writes
-    // (None -> LeaderSoft -> Follower) within the same audio callback for
-    // that one direction -- a transient a human single-button click never
-    // produces. Waiting a full tick (50ms, several audio buffers) before
-    // touching the incoming deck's sync_enabled guarantees the outgoing
-    // deck's leader request has already landed and stabilized, so
-    // pickLeader() sees it as synchronized immediately and never
-    // self-elects the incoming deck. See docs/decisions/0008 addendum.
-    outgoing.syncLeader.set(2.0);
-    m_syncHandoffPending = true;
+    // Tempo matching (REWORKED 2026-10-05, see docs/decisions/0008 "snap to
+    // grid" addendum): a single one-shot rate_ratio write on the incoming
+    // deck, NOT Mixxx's Sync engine. The previous approach (outgoing.
+    // syncLeader.set(2.0) + a deferred incoming.syncEnabled.set(1.0)) got
+    // tempo matching "for free" from Sync, but Sync's tempo lock is
+    // continuous and inseparable from its own continuous beatgrid-phase
+    // correction -- it kept forcibly re-aligning the incoming deck's beat
+    // position to the leader's beatgrid for as long as it stayed enabled,
+    // silently overwriting any manual beatmatching/pitch-bend Dan had
+    // already dialed in on the incoming track before pressing MIX. That is
+    // the bug this rework fixes. Setting rate_ratio only ever changes
+    // playback speed; it never reads or writes beat position, so it is
+    // physically incapable of fighting manual alignment, and -- critically
+    // -- it is applied exactly once, right here, never re-applied on any
+    // later tick, so there is no ongoing lock of any kind for Dan's manual
+    // touch to fight afterward either.
+    const double tempoMatchedRatio = AutomixTransitionMath::tempoMatchedIncomingRateRatio(
+            outgoing.bpm.get(), incoming.bpm.get(), incoming.rateRatio.get());
+    if (tempoMatchedRatio > 0.0) {
+        incoming.rateRatio.set(tempoMatchedRatio);
+    }
+    // else: incoming deck has no usable bpm/rate_ratio reading (e.g. no
+    // track loaded/analyzed) -- skip tempo matching rather than writing a
+    // garbage rate_ratio; the rest of the transition (crossfader/EQ/filter)
+    // still proceeds, same as before this rework.
 
     // Write the progress-0 state immediately so the transition starts from a
     // known point and the override baseline below is consistent with what we
@@ -174,15 +155,6 @@ void AutomixTransitionController::startTransition(int fromDeckNumber) {
 void AutomixTransitionController::slotTick() {
     if (!m_active) {
         return;
-    }
-
-    if (m_syncHandoffPending) {
-        // See startTransition() for why this is deferred to here (one tick
-        // after requesting leader status on the outgoing deck) instead of
-        // being written synchronously in the same call.
-        DeckControls& incoming = (m_fromDeckNumber == 1) ? m_deck2 : m_deck1;
-        incoming.syncEnabled.set(1.0);
-        m_syncHandoffPending = false;
     }
 
     if (wasManuallyOverridden()) {
@@ -295,11 +267,16 @@ void AutomixTransitionController::writeIncomingMidScoop(double value) {
 }
 
 void AutomixTransitionController::finishTransition() {
-    releaseSyncLock();
+    // No sync state to release anymore (2026-10-05 rework, see the class
+    // comment in the header): tempo matching is a single one-shot
+    // rate_ratio write at transition start, not a continuously-held engine
+    // lock, so there is nothing left engaged on either deck to clean up
+    // here. The incoming deck's rate_ratio simply stays at whatever value
+    // this class (or Dan) last set it to -- exactly like a human pitch-bend
+    // would behave after letting go of the pitch fader.
     m_timer.stop();
     m_active = false;
     m_fromDeckNumber = 0;
-    m_syncHandoffPending = false;
 }
 
 void AutomixTransitionController::cancelTransition(const char* reason) {
@@ -307,31 +284,13 @@ void AutomixTransitionController::cancelTransition(const char* reason) {
     // Hand control back immediately: stop touching the crossfader/EQ/filter
     // at all and leave those exactly where the human just put it -- no
     // snap-back there, that's the point of "hands it back immediately".
-    // Sync is the one exception: startTransition() may already have set
-    // sync_enabled=1 on the incoming deck (and sync_leader on the outgoing
-    // one) before the cancellation happened, and leaving that engaged would
-    // permanently lock the deck to the other one's tempo/phase -- silently
-    // fighting every manual jog/pitch nudge from then on. Release it so
-    // "hands control back" is actually true for tempo too, not just the
-    // faders.
-    releaseSyncLock();
+    // No sync state to release (see finishTransition() above and the
+    // 2026-10-05 header comment) -- the one-shot rate_ratio tempo match
+    // already happened (if at all) before this transition could even reach
+    // slotTick()'s override check, and leaving it applied is correct: it is
+    // indistinguishable from a manual pitch-bend Dan could have done
+    // himself, not an ongoing lock that needs releasing.
     m_timer.stop();
     m_active = false;
     m_fromDeckNumber = 0;
-    m_syncHandoffPending = false;
-}
-
-void AutomixTransitionController::releaseSyncLock() {
-    if (m_fromDeckNumber == 0) {
-        return; // Nothing was ever touched this transition (e.g. refused at start).
-    }
-    DeckControls& outgoing = (m_fromDeckNumber == 1) ? m_deck1 : m_deck2;
-    DeckControls& incoming = (m_fromDeckNumber == 1) ? m_deck2 : m_deck1;
-    // Only the incoming deck's sync_enabled actively keeps correcting phase
-    // (that's what makes manual beatmatching feel "impossible" afterward,
-    // per Dan's live-test report). The outgoing deck's sync_leader doesn't
-    // itself lock anything once no other deck is following it, but clear it
-    // too for a clean, fully-manual handback on both sides.
-    incoming.syncEnabled.set(0.0);
-    outgoing.syncLeader.set(0.0);
 }

@@ -209,3 +209,53 @@ TEST_F(AutomixTransitionMathTest, MidScoopGainForProgress_ClampsOutOfRangeProgre
     EXPECT_NEAR(1.0, AutomixTransitionMath::midScoopGainForProgress(-0.5), 1e-9);
     EXPECT_NEAR(1.0, AutomixTransitionMath::midScoopGainForProgress(1.5), 1e-9);
 }
+
+// --- One-shot tempo match via rate_ratio (added 2026-10-05, "snap to grid
+// destroys manual beatmatching" bugfix -- replaces the continuous
+// sync_leader/sync_enabled approach, which forced ongoing phase correction
+// as an inseparable side effect of tempo matching). Pure proportion math:
+// newRatio = incomingRateRatio * (outgoingBpm / incomingBpm). ---
+
+TEST_F(AutomixTransitionMathTest, TempoMatchedIncomingRateRatio_MatchesOutgoingBpm) {
+    // Incoming deck at 130 BPM with no existing pitch adjustment (rate_ratio
+    // 1.0); outgoing deck at 128 BPM. New ratio should make
+    // incomingLocalBpm * newRatio == outgoingBpm, i.e. 130 * newRatio == 128.
+    const double newRatio = AutomixTransitionMath::tempoMatchedIncomingRateRatio(
+            /*outgoingBpm=*/128.0, /*incomingBpm=*/130.0, /*incomingRateRatio=*/1.0);
+    EXPECT_NEAR(128.0, 130.0 * newRatio, 1e-9);
+}
+
+TEST_F(AutomixTransitionMathTest, TempoMatchedIncomingRateRatio_RespectsExistingPitchAdjustment) {
+    // Incoming deck already pitched up by +4% (rate_ratio 1.04) and
+    // currently reading 130 BPM effective. The new ratio must still land the
+    // incoming deck's EFFECTIVE bpm on the outgoing deck's bpm, regardless of
+    // whatever rate_ratio it started at.
+    const double newRatio = AutomixTransitionMath::tempoMatchedIncomingRateRatio(
+            /*outgoingBpm=*/120.0, /*incomingBpm=*/130.0, /*incomingRateRatio=*/1.04);
+    // incomingLocalBpm = incomingBpm / incomingRateRatio.
+    const double incomingLocalBpm = 130.0 / 1.04;
+    EXPECT_NEAR(120.0, incomingLocalBpm * newRatio, 1e-9);
+}
+
+TEST_F(AutomixTransitionMathTest, TempoMatchedIncomingRateRatio_NoOpWhenAlreadyMatched) {
+    // Both decks already at the same effective bpm with unity rate_ratio:
+    // the new ratio should be (very close to) 1.0, not drift the deck.
+    const double newRatio = AutomixTransitionMath::tempoMatchedIncomingRateRatio(
+            128.0, 128.0, 1.0);
+    EXPECT_NEAR(1.0, newRatio, 1e-9);
+}
+
+TEST_F(AutomixTransitionMathTest, TempoMatchedIncomingRateRatio_InvalidOutgoingBpmReturnsNegative) {
+    EXPECT_LT(AutomixTransitionMath::tempoMatchedIncomingRateRatio(0.0, 130.0, 1.0), 0.0);
+    EXPECT_LT(AutomixTransitionMath::tempoMatchedIncomingRateRatio(-5.0, 130.0, 1.0), 0.0);
+}
+
+TEST_F(AutomixTransitionMathTest, TempoMatchedIncomingRateRatio_InvalidIncomingBpmReturnsNegative) {
+    EXPECT_LT(AutomixTransitionMath::tempoMatchedIncomingRateRatio(128.0, 0.0, 1.0), 0.0);
+    EXPECT_LT(AutomixTransitionMath::tempoMatchedIncomingRateRatio(128.0, -5.0, 1.0), 0.0);
+}
+
+TEST_F(AutomixTransitionMathTest, TempoMatchedIncomingRateRatio_InvalidIncomingRateRatioReturnsNegative) {
+    EXPECT_LT(AutomixTransitionMath::tempoMatchedIncomingRateRatio(128.0, 130.0, 0.0), 0.0);
+    EXPECT_LT(AutomixTransitionMath::tempoMatchedIncomingRateRatio(128.0, 130.0, -1.0), 0.0);
+}
