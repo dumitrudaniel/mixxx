@@ -94,7 +94,7 @@ vertical layout and a side-by-side layout for two-deck mode -->
           <WidgetGroup><Size>1min,4f</Size></WidgetGroup>
 
           <!-- Faza 1.5: starts a 16-bar automated transition from this deck
-               (1) to the other deck (2) -- crossfader sweep + bass swap at
+               (1) to the other deck (2): crossfader sweep + bass swap at
                the midpoint + Sync enabled on deck 2. Manually touching the
                crossfader, EQ knobs or either channel's volume fader during
                the transition cancels it immediately. See

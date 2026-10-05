@@ -580,6 +580,18 @@ void Tooltips::addStandardTooltips() {
             << tr("Sends the selected channel's audio to the headphone output, "
                   "selected in Preferences -> Sound Hardware.");
 
+    add("automix_transition_to_2")
+            << tr("Automix Transition")
+            << tr("Starts an automated transition from this deck to the other deck "
+                  "(crossfader sweep + bass swap + sync). Touching the crossfader, "
+                  "EQ knobs or either channel's volume fader cancels it.");
+
+    add("automix_transition_to_1")
+            << tr("Automix Transition")
+            << tr("Starts an automated transition from this deck to the other deck "
+                  "(crossfader sweep + bass swap + sync). Touching the crossfader, "
+                  "EQ knobs or either channel's volume fader cancels it.");
+
     add("mute")
             << tr("Mute")
             << tr("Mutes the selected channel's audio in the main output.");
