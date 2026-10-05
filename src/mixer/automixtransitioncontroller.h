@@ -69,6 +69,11 @@ class AutomixTransitionController : public QObject {
     void startTransition(int fromDeckNumber);
     void cancelTransition(const char* reason);
     void finishTransition();
+    // Disables sync_enabled on the deck that was synced-in and clears
+    // sync_leader on the other one, so neither transition exit path leaves
+    // a deck permanently phase/tempo-locked to its partner. See
+    // docs/decisions/0008 addendum (2026-10-05, SYNC left engaged bug).
+    void releaseSyncLock();
 
     // Returns true if any automated control (crossfader, either deck's
     // low/mid/high EQ, either deck's filter) or any watched-but-not-written
