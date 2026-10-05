@@ -6,14 +6,14 @@ class AutomixTransitionMathTest : public testing::Test {
 };
 
 TEST_F(AutomixTransitionMathTest, TransitionDurationSeconds_128Bpm) {
-    // 16 bars * 4 beats/bar = 64 beats. At 128 BPM, one beat = 60/128 s.
-    const double expected = 64.0 * (60.0 / 128.0);
+    // 2 bars * 4 beats/bar = 8 beats. At 128 BPM, one beat = 60/128 s.
+    const double expected = 8.0 * (60.0 / 128.0);
     EXPECT_DOUBLE_EQ(expected, AutomixTransitionMath::transitionDurationSeconds(128.0));
 }
 
 TEST_F(AutomixTransitionMathTest, TransitionDurationSeconds_120Bpm) {
-    // Round number: 64 beats at 120 BPM (0.5s/beat) = 32 seconds exactly.
-    EXPECT_DOUBLE_EQ(32.0, AutomixTransitionMath::transitionDurationSeconds(120.0));
+    // Round number: 8 beats at 120 BPM (0.5s/beat) = 4 seconds exactly.
+    EXPECT_DOUBLE_EQ(4.0, AutomixTransitionMath::transitionDurationSeconds(120.0));
 }
 
 TEST_F(AutomixTransitionMathTest, TransitionDurationSeconds_InvalidBpmReturnsNegative) {

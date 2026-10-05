@@ -104,7 +104,7 @@ vertical layout and a side-by-side layout for two-deck mode -->
             <SetVariable name="ObjectName">AutomixTransitionButton1</SetVariable>
             <SetVariable name="BtnType"></SetVariable>
             <SetVariable name="ConfigKey">[Channel1],automix_transition_to_2</SetVariable>
-            <SetVariable name="Size">42f,16f</SetVariable>
+            <SetVariable name="Size">52f,22f</SetVariable>
             <SetVariable name="state_0_text">MIX &gt;</SetVariable>
             <SetVariable name="Align">center</SetVariable>
           </Template>
