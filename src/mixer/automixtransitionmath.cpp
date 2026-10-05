@@ -29,18 +29,6 @@ double AutomixTransitionMath::crossfaderForProgress(double progress, bool fromDe
 }
 
 // static
-double AutomixTransitionMath::outgoingEqGainForProgress(double progress) {
-    const double clamped = std::clamp(progress, 0.0, 1.0);
-    return kEqUnityGain + clamped * (kEqCutGain - kEqUnityGain);
-}
-
-// static
-double AutomixTransitionMath::incomingEqGainForProgress(double progress) {
-    const double clamped = std::clamp(progress, 0.0, 1.0);
-    return kEqCutGain + clamped * (kEqUnityGain - kEqCutGain);
-}
-
-// static
 double AutomixTransitionMath::outgoingBassGainForProgress(double progress) {
     const double clamped = std::clamp(progress, 0.0, 1.0);
     if (clamped >= kBassSwapFraction) {

@@ -12,17 +12,28 @@
 // Faza 1.5 -- Automix semiauto (see PLAN.md).
 //
 // Self-contained, Mixxx-C++-only automation of the mechanical part of a DJ
-// transition between deck 1 and deck 2: crossfader sweep + continuous 3-band
-// EQ fade + filter sweep + enabling Mixxx's own Sync engine on the incoming
-// deck. Cue points, loops and track choice remain fully manual (native Mixxx
-// hotcues/loops) -- this class only drives the fader/EQ/filter/sync
-// mechanics once Dan presses one of the two trigger buttons it exposes.
+// transition between deck 1 and deck 2: crossfader sweep (the sole primary
+// volume blend) + low-band-only EQ swap (tonal, avoids bass mud) + filter
+// sweep + enabling Mixxx's own Sync engine on the incoming deck. Cue points,
+// loops and track choice remain fully manual (native Mixxx hotcues/loops) --
+// this class only drives the fader/EQ/filter/sync mechanics once Dan presses
+// one of the two trigger buttons it exposes.
 //
 // 2026-10-05: upgraded from the original MVP (crossfader sweep + instant
-// low-band-only swap at the midpoint) to continuous 3-band EQ + filter sweep
-// -- see docs/decisions/0008 addendum. The low-band-only instant-swap logic
-// has been removed entirely, replaced by AutomixTransitionMath::
-// outgoing/incomingEqGainForProgress() applied to all three bands.
+// low-band-only swap at the midpoint) to continuous 3-band EQ + filter sweep,
+// then the mid/high portion of that EQ automation was REMOVED again later
+// the same day after Dan reported a volume "jump" around the transition
+// midpoint -- see docs/decisions/0008 addenda. Root cause: crossfader gain
+// (constant-power) and mid/high EQ gain were both independently attenuating
+// each deck's volume at the same time, compounding multiplicatively into a
+// real dip at progress=0.5 that read as a jump on recovery. Mid/high bands
+// are now left untouched (unity gain, never written by this class) for the
+// whole transition -- the crossfader alone carries their presence. Only the
+// low band keeps its own front-loaded swap curve (AutomixTransitionMath::
+// outgoing/incomingBassGainForProgress), which is NOT redundant with the
+// crossfader: it addresses bass-mud between two simultaneously-playing
+// basslines, a problem that exists regardless of their relative crossfader
+// volume.
 //
 // Explicitly out of scope for this MVP (Dan's approval, 2026-10-04):
 //  - Duration selection (hardcoded 2 bars as of 2026-10-05, was 16 bars).
@@ -52,9 +63,11 @@ class AutomixTransitionController : public QObject {
         QString group;
         ControlProxy bpm;
         ControlProxy volume;
+        // Low band only -- mid/high are deliberately left untouched (unity
+        // gain) for the whole transition, see the class comment above for
+        // why. No eqMidGain/eqHighGain members: this class never reads or
+        // writes those COs anymore.
         ControlProxy eqLowGain;
-        ControlProxy eqMidGain;
-        ControlProxy eqHighGain;
         // Quick-filter ("Filter" knob), [QuickEffectRack1_[ChannelN]],super1
         // -- confirmed in source (effects/backends/builtin/filtereffect.cpp),
         // not the skin's separate EQ knobs. See automixtransitionmath.h for
@@ -75,19 +88,20 @@ class AutomixTransitionController : public QObject {
     // docs/decisions/0008 addendum (2026-10-05, SYNC left engaged bug).
     void releaseSyncLock();
 
-    // Returns true if any automated control (crossfader, either deck's
-    // low/mid/high EQ, either deck's filter) or any watched-but-not-written
-    // control (either deck's volume) has a current value that no longer
-    // matches what this class last wrote / observed as the baseline -- i.e.
-    // a human touched it.
+    // Returns true if any automated control (crossfader, either deck's low
+    // EQ, either deck's filter) or any watched-but-not-written control
+    // (either deck's volume) has a current value that no longer matches what
+    // this class last wrote / observed as the baseline -- i.e. a human
+    // touched it. Mid/high EQ is deliberately NOT monitored: this class
+    // never writes those COs, so a human touching them during a transition
+    // is an independent action, not an override of our automation.
     bool wasManuallyOverridden() const;
 
     void writeCrossfader(double value);
-    // midHighValue drives the mid/high bands (full-duration curve);
-    // bassValue drives the low band separately (front-loaded curve, see
-    // AutomixTransitionMath::outgoing/incomingBassGainForProgress).
-    void writeOutgoingEq(double midHighValue, double bassValue);
-    void writeIncomingEq(double midHighValue, double bassValue);
+    // Low band only (front-loaded curve, see AutomixTransitionMath::
+    // outgoing/incomingBassGainForProgress). Mid/high are never written.
+    void writeOutgoingBass(double bassValue);
+    void writeIncomingBass(double bassValue);
     void writeOutgoingFilter(double value);
     void writeIncomingFilter(double value);
 
@@ -118,11 +132,9 @@ class AutomixTransitionController : public QObject {
 
     // Last values *this class* wrote, for manual-override detection.
     double m_lastWrittenCrossfader = 0.0;
-    // Mid/high move together on the full-duration curve; low (bass) moves on
-    // its own front-loaded curve -- see AutomixTransitionMath, 2026-10-05
-    // bass-staggering addendum.
-    double m_lastWrittenOutgoingEqMidHigh = 0.0;
-    double m_lastWrittenIncomingEqMidHigh = 0.0;
+    // Low (bass) moves on its own front-loaded curve -- see
+    // AutomixTransitionMath, 2026-10-05 bass-staggering addendum. Mid/high
+    // have no equivalent here: they are never written (see class comment).
     double m_lastWrittenOutgoingBass = 0.0;
     double m_lastWrittenIncomingBass = 0.0;
     double m_lastWrittenOutgoingFilter = 0.0;
