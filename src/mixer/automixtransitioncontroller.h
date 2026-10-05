@@ -14,10 +14,10 @@
 // Self-contained, Mixxx-C++-only automation of the mechanical part of a DJ
 // transition between deck 1 and deck 2: crossfader sweep (the sole primary
 // volume blend) + low-band-only EQ swap (tonal, avoids bass mud) + filter
-// sweep + enabling Mixxx's own Sync engine on the incoming deck. Cue points,
-// loops and track choice remain fully manual (native Mixxx hotcues/loops) --
-// this class only drives the fader/EQ/filter/sync mechanics once Dan presses
-// one of the two trigger buttons it exposes.
+// sweep + a one-shot tempo match (rate_ratio) on the incoming deck. Cue
+// points, loops and track choice remain fully manual (native Mixxx
+// hotcues/loops) -- this class only drives the fader/EQ/filter/tempo
+// mechanics once Dan presses one of the two trigger buttons it exposes.
 //
 // 2026-10-05: upgraded from the original MVP (crossfader sweep + instant
 // low-band-only swap at the midpoint) to continuous 3-band EQ + filter sweep,
@@ -34,6 +34,20 @@
 // crossfader: it addresses bass-mud between two simultaneously-playing
 // basslines, a problem that exists regardless of their relative crossfader
 // volume.
+//
+// 2026-10-05 (later addendum, "snap to grid destroys manual beatmatching"):
+// tempo matching was REWORKED from continuously-held sync_leader (outgoing)
+// + sync_enabled (incoming) -- Mixxx's own Sync engine -- to a single
+// one-shot rate_ratio write on the incoming deck at transition start. The
+// sync engine's continuous tempo lock also forces ongoing beatgrid-phase
+// correction as an inseparable side effect, which silently snapped/discarded
+// any manual beatmatching or pitch-bend Dan had already done to the incoming
+// track BEFORE pressing MIX, the instant the transition started. The
+// one-shot rate_ratio write only ever changes playback speed (via
+// AutomixTransitionMath::tempoMatchedIncomingRateRatio()); it never reads or
+// writes beat position, so it cannot fight manual alignment, and -- unlike
+// sync_enabled -- it is never held or re-applied after that single write.
+// This class no longer reads or writes sync_leader/sync_enabled at all.
 //
 // Explicitly out of scope for this MVP (Dan's approval, 2026-10-04):
 //  - Duration selection (hardcoded 2 bars as of 2026-10-05, was 16 bars).
@@ -81,19 +95,22 @@ class AutomixTransitionController : public QObject {
         // the confirmed value range/semantics (0.5 neutral, 1.0 full
         // high-pass, 0.0 full low-pass).
         ControlProxy filter;
-        ControlProxy syncEnabled;
-        ControlProxy syncLeader;
+        // [ChannelN],rate_ratio -- the live playback-speed multiplier such
+        // that effective bpm == local (unstretched) bpm * rate_ratio
+        // (confirmed in engine/controls/bpmcontrol.cpp,
+        // slotUpdateEngineBpm()/[ChannelN],bpm wiring, and
+        // engine/controls/ratecontrol.cpp). Used ONCE, at transition start,
+        // to tempo-match the incoming deck to the outgoing deck's current
+        // bpm -- see AutomixTransitionMath::tempoMatchedIncomingRateRatio()
+        // and the class comment above. Never re-read/re-written afterward;
+        // this is deliberately NOT part of the per-tick automation loop.
+        ControlProxy rateRatio;
     };
 
     // fromDeckNumber is 1 or 2; the other deck is the transition target.
     void startTransition(int fromDeckNumber);
     void cancelTransition(const char* reason);
     void finishTransition();
-    // Disables sync_enabled on the deck that was synced-in and clears
-    // sync_leader on the other one, so neither transition exit path leaves
-    // a deck permanently phase/tempo-locked to its partner. See
-    // docs/decisions/0008 addendum (2026-10-05, SYNC left engaged bug).
-    void releaseSyncLock();
 
     // Returns true if any automated control (crossfader, either deck's low
     // EQ, either deck's filter) or any watched-but-not-written control
@@ -135,14 +152,6 @@ class AutomixTransitionController : public QObject {
     bool m_active = false;
     int m_fromDeckNumber = 0; // 1 or 2 while active, 0 when idle
     double m_durationSeconds = 0.0;
-
-    // See automixtransitioncontroller.cpp (startTransition) for why this
-    // exists: enabling sync on the incoming deck is deferred by one tick
-    // (50ms) after requesting leader status on the outgoing deck, instead of
-    // writing both COs back-to-back in the same call, to avoid a real
-    // cross-channel race in Mixxx's own EngineSync::pickLeader() that is
-    // direction-dependent (only occurs for the deck2->deck1 transition).
-    bool m_syncHandoffPending = false;
 
     // Last values *this class* wrote, for manual-override detection.
     double m_lastWrittenCrossfader = 0.0;

@@ -78,3 +78,12 @@ double AutomixTransitionMath::midScoopGainForProgress(double progress) {
     const double clamped = std::clamp(progress, 0.0, 1.0);
     return kEqUnityGain - kMidScoopDepth * std::sin(kPi * clamped);
 }
+
+// static
+double AutomixTransitionMath::tempoMatchedIncomingRateRatio(
+        double outgoingBpm, double incomingBpm, double incomingRateRatio) {
+    if (outgoingBpm <= 0.0 || incomingBpm <= 0.0 || incomingRateRatio <= 0.0) {
+        return -1.0;
+    }
+    return incomingRateRatio * (outgoingBpm / incomingBpm);
+}

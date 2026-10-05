@@ -51,6 +51,16 @@
 //    compounds with an already-heavy attenuation. Depth is controlled by a
 //    single constant (kMidScoopDepth) that can be set to 0.0 to disable the
 //    effect entirely without removing the code path.
+//  - Tempo matching (REWORKED 2026-10-05, see docs/decisions/0008 "snap to
+//    grid" addendum): a single one-shot rate_ratio adjustment on the
+//    incoming deck at transition start (tempoMatchedIncomingRateRatio()
+//    below), NOT Mixxx's continuous sync engine. The previous approach
+//    (sync_leader on outgoing + sync_enabled on incoming) matched tempo by
+//    riding Mixxx's own Sync engine, which also forces ongoing beatgrid
+//    phase correction as an inseparable side effect -- discarding any
+//    manual beatmatching/pitch-bend Dan had already done before pressing
+//    MIX. The one-shot rate_ratio write only ever changes playback speed;
+//    it never touches beat position, so it cannot fight manual alignment.
 class AutomixTransitionMath {
   public:
     // Transition length in bars/beats. Revised 16->2 bars 2026-10-05 per
@@ -164,4 +174,33 @@ class AutomixTransitionMath {
     // decks. Returns kEqUnityGain (no-op) for every progress when
     // kMidScoopDepth is 0.0.
     static double midScoopGainForProgress(double progress);
+
+    // One-shot tempo match (2026-10-05, see docs/decisions/0008 addendum --
+    // "snap to grid destroys manual beatmatching" bugfix). Computes the new
+    // [ChannelN],rate_ratio value for the INCOMING deck that makes its
+    // current effective BPM equal the outgoing deck's current effective BPM,
+    // given the incoming deck's own current bpm/rate_ratio -- pure
+    // proportion math, no engine/sync dependency:
+    //
+    //   newRatio = incomingRateRatio * (outgoingBpm / incomingBpm)
+    //
+    // This is deliberately the ONLY tempo-matching mechanism as of this
+    // addendum: it replaces continuously-held sync_leader/sync_enabled
+    // (Mixxx's sync engine), which forces ongoing beatgrid-phase correction
+    // as a side effect of tempo matching -- exactly the behavior that
+    // silently discarded Dan's manual beatmatching/pitch-bend the instant a
+    // transition started. Setting rate_ratio only ever touches playback
+    // speed; it never reads or writes beat position/phase, so it cannot
+    // fight any manual alignment the deck already has. Applied once, at
+    // transition start, then never touched again for the rest of the
+    // transition -- not re-applied per tick like the crossfader/EQ/filter
+    // curves above.
+    //
+    // Returns -1.0 (invalid/refuse-to-apply sentinel) if outgoingBpm,
+    // incomingBpm, or incomingRateRatio is <= 0.0 (no usable track/tempo on
+    // one side, or a corrupt rate_ratio reading) -- callers must treat a
+    // negative return as "do not write rate_ratio this transition", not
+    // clamp it to some fallback value.
+    static double tempoMatchedIncomingRateRatio(
+            double outgoingBpm, double incomingBpm, double incomingRateRatio);
 };
