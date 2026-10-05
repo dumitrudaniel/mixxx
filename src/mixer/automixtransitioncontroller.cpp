@@ -272,6 +272,7 @@ void AutomixTransitionController::writeIncomingFilter(double value) {
 }
 
 void AutomixTransitionController::finishTransition() {
+    releaseSyncLock();
     m_timer.stop();
     m_active = false;
     m_fromDeckNumber = 0;
@@ -280,11 +281,34 @@ void AutomixTransitionController::finishTransition() {
 
 void AutomixTransitionController::cancelTransition(const char* reason) {
     Q_UNUSED(reason);
-    // Hand control back immediately: stop touching any control at all and
-    // leave everything exactly where the human just put it. No snap-back,
-    // no further writes -- that's the point of "hands it back immediately".
+    // Hand control back immediately: stop touching the crossfader/EQ/filter
+    // at all and leave those exactly where the human just put it -- no
+    // snap-back there, that's the point of "hands it back immediately".
+    // Sync is the one exception: startTransition() may already have set
+    // sync_enabled=1 on the incoming deck (and sync_leader on the outgoing
+    // one) before the cancellation happened, and leaving that engaged would
+    // permanently lock the deck to the other one's tempo/phase -- silently
+    // fighting every manual jog/pitch nudge from then on. Release it so
+    // "hands control back" is actually true for tempo too, not just the
+    // faders.
+    releaseSyncLock();
     m_timer.stop();
     m_active = false;
     m_fromDeckNumber = 0;
     m_syncHandoffPending = false;
+}
+
+void AutomixTransitionController::releaseSyncLock() {
+    if (m_fromDeckNumber == 0) {
+        return; // Nothing was ever touched this transition (e.g. refused at start).
+    }
+    DeckControls& outgoing = (m_fromDeckNumber == 1) ? m_deck1 : m_deck2;
+    DeckControls& incoming = (m_fromDeckNumber == 1) ? m_deck2 : m_deck1;
+    // Only the incoming deck's sync_enabled actively keeps correcting phase
+    // (that's what makes manual beatmatching feel "impossible" afterward,
+    // per Dan's live-test report). The outgoing deck's sync_leader doesn't
+    // itself lock anything once no other deck is following it, but clear it
+    // too for a clean, fully-manual handback on both sides.
+    incoming.syncEnabled.set(0.0);
+    outgoing.syncLeader.set(0.0);
 }
