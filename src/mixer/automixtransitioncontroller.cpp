@@ -26,8 +26,24 @@ AutomixTransitionController::DeckControls::DeckControls(const QString& group)
         : group(group),
           bpm(group, QStringLiteral("bpm")),
           volume(group, QStringLiteral("volume")),
+          // parameter1/2/3 on the per-deck EqualizerRack1 effect == Low/Mid/
+          // High respectively -- confirmed from the skin's EQ knob mapping
+          // (mixer/channel_left.xml: EqParameter 1/2/3 -> Low/Mid/High via
+          // mixer/eq_knob_left.xml's <ConfigKey>...,parameter<EqParameter>).
           eqLowGain(QStringLiteral("[EqualizerRack1_") + group + QStringLiteral("_Effect1]"),
                   QStringLiteral("parameter1")),
+          eqMidGain(QStringLiteral("[EqualizerRack1_") + group + QStringLiteral("_Effect1]"),
+                  QStringLiteral("parameter2")),
+          eqHighGain(QStringLiteral("[EqualizerRack1_") + group + QStringLiteral("_Effect1]"),
+                  QStringLiteral("parameter3")),
+          // Quick-filter ("Filter" knob) -- confirmed from the skin
+          // (mixer/quick_effect_knob_left.xml: KnobComposed bound to
+          // <QuickEffectGroup>,super1) and from effects/effectchain.cpp
+          // (m_pControlChainSuperParameter is a ControlPotmeter with range
+          // [0.0, 1.0]). This is the single combined LPF/HPF "Filter" knob,
+          // NOT the 3-band EQ knobs above.
+          filter(QStringLiteral("[QuickEffectRack1_") + group + QStringLiteral("]"),
+                  QStringLiteral("super1")),
           syncEnabled(group, QStringLiteral("sync_enabled")),
           syncLeader(group, QStringLiteral("sync_leader")) {
 }
@@ -138,8 +154,10 @@ void AutomixTransitionController::startTransition(int fromDeckNumber) {
     // known point and the override baseline below is consistent with what we
     // just wrote.
     writeCrossfader(AutomixTransitionMath::crossfaderForProgress(0.0, fromDeckNumber == 1));
-    writeOutgoingBass(AutomixTransitionMath::outgoingBassGainForProgress(0.0));
-    writeIncomingBass(AutomixTransitionMath::incomingBassGainForProgress(0.0));
+    writeOutgoingEq(AutomixTransitionMath::outgoingEqGainForProgress(0.0));
+    writeIncomingEq(AutomixTransitionMath::incomingEqGainForProgress(0.0));
+    writeOutgoingFilter(AutomixTransitionMath::outgoingFilterForProgress(0.0));
+    writeIncomingFilter(AutomixTransitionMath::incomingFilterForProgress(0.0));
 
     m_elapsed.start();
     m_timer.start();
@@ -170,8 +188,10 @@ void AutomixTransitionController::slotTick() {
 
     const bool fromDeck1 = (m_fromDeckNumber == 1);
     writeCrossfader(AutomixTransitionMath::crossfaderForProgress(progress, fromDeck1));
-    writeOutgoingBass(AutomixTransitionMath::outgoingBassGainForProgress(progress));
-    writeIncomingBass(AutomixTransitionMath::incomingBassGainForProgress(progress));
+    writeOutgoingEq(AutomixTransitionMath::outgoingEqGainForProgress(progress));
+    writeIncomingEq(AutomixTransitionMath::incomingEqGainForProgress(progress));
+    writeOutgoingFilter(AutomixTransitionMath::outgoingFilterForProgress(progress));
+    writeIncomingFilter(AutomixTransitionMath::incomingFilterForProgress(progress));
 
     if (progress >= 1.0) {
         finishTransition();
@@ -185,10 +205,20 @@ bool AutomixTransitionController::wasManuallyOverridden() const {
     if (diverged(m_crossfader.get(), m_lastWrittenCrossfader)) {
         return true;
     }
-    if (diverged(outgoing.eqLowGain.get(), m_lastWrittenOutgoingBass)) {
+    if (diverged(outgoing.eqLowGain.get(), m_lastWrittenOutgoingEq) ||
+            diverged(outgoing.eqMidGain.get(), m_lastWrittenOutgoingEq) ||
+            diverged(outgoing.eqHighGain.get(), m_lastWrittenOutgoingEq)) {
         return true;
     }
-    if (diverged(incoming.eqLowGain.get(), m_lastWrittenIncomingBass)) {
+    if (diverged(incoming.eqLowGain.get(), m_lastWrittenIncomingEq) ||
+            diverged(incoming.eqMidGain.get(), m_lastWrittenIncomingEq) ||
+            diverged(incoming.eqHighGain.get(), m_lastWrittenIncomingEq)) {
+        return true;
+    }
+    if (diverged(outgoing.filter.get(), m_lastWrittenOutgoingFilter)) {
+        return true;
+    }
+    if (diverged(incoming.filter.get(), m_lastWrittenIncomingFilter)) {
         return true;
     }
     // Volume faders are never written by this class, but touching them
@@ -207,16 +237,32 @@ void AutomixTransitionController::writeCrossfader(double value) {
     m_lastWrittenCrossfader = value;
 }
 
-void AutomixTransitionController::writeOutgoingBass(double value) {
+void AutomixTransitionController::writeOutgoingEq(double value) {
     DeckControls& outgoing = (m_fromDeckNumber == 1) ? m_deck1 : m_deck2;
     outgoing.eqLowGain.set(value);
-    m_lastWrittenOutgoingBass = value;
+    outgoing.eqMidGain.set(value);
+    outgoing.eqHighGain.set(value);
+    m_lastWrittenOutgoingEq = value;
 }
 
-void AutomixTransitionController::writeIncomingBass(double value) {
+void AutomixTransitionController::writeIncomingEq(double value) {
     DeckControls& incoming = (m_fromDeckNumber == 1) ? m_deck2 : m_deck1;
     incoming.eqLowGain.set(value);
-    m_lastWrittenIncomingBass = value;
+    incoming.eqMidGain.set(value);
+    incoming.eqHighGain.set(value);
+    m_lastWrittenIncomingEq = value;
+}
+
+void AutomixTransitionController::writeOutgoingFilter(double value) {
+    DeckControls& outgoing = (m_fromDeckNumber == 1) ? m_deck1 : m_deck2;
+    outgoing.filter.set(value);
+    m_lastWrittenOutgoingFilter = value;
+}
+
+void AutomixTransitionController::writeIncomingFilter(double value) {
+    DeckControls& incoming = (m_fromDeckNumber == 1) ? m_deck2 : m_deck1;
+    incoming.filter.set(value);
+    m_lastWrittenIncomingFilter = value;
 }
 
 void AutomixTransitionController::finishTransition() {

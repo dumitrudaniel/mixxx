@@ -49,23 +49,73 @@ TEST_F(AutomixTransitionMathTest, CrossfaderForProgress_Deck2ToDeck1SweepIsRever
     EXPECT_DOUBLE_EQ(-1.0, AutomixTransitionMath::crossfaderForProgress(1.0, false));
 }
 
-TEST_F(AutomixTransitionMathTest, BassSwap_HappensExactlyAtMidpoint) {
-    // Just before the midpoint: outgoing deck still has bass, incoming is cut.
-    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::outgoingBassGainForProgress(0.49));
-    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::incomingBassGainForProgress(0.49));
+// --- EQ gain (low/mid/high, all identical) -- continuous linear fade,
+// replacing the old instant-swap-at-midpoint behavior (2026-10-05). ---
 
-    // At and after the midpoint: swapped.
-    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::outgoingBassGainForProgress(0.5));
-    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::incomingBassGainForProgress(0.5));
-    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::outgoingBassGainForProgress(0.9));
-    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::incomingBassGainForProgress(0.9));
+TEST_F(AutomixTransitionMathTest, OutgoingEqGainForProgress_FadesUnityToCut) {
+    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::outgoingEqGainForProgress(0.0));
+    EXPECT_DOUBLE_EQ(0.75, AutomixTransitionMath::outgoingEqGainForProgress(0.25));
+    EXPECT_DOUBLE_EQ(0.5, AutomixTransitionMath::outgoingEqGainForProgress(0.5));
+    EXPECT_DOUBLE_EQ(0.25, AutomixTransitionMath::outgoingEqGainForProgress(0.75));
+    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::outgoingEqGainForProgress(1.0));
 }
 
-TEST_F(AutomixTransitionMathTest, BassSwap_AlwaysComplementary) {
+TEST_F(AutomixTransitionMathTest, IncomingEqGainForProgress_FadesCutToUnity) {
+    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::incomingEqGainForProgress(0.0));
+    EXPECT_DOUBLE_EQ(0.25, AutomixTransitionMath::incomingEqGainForProgress(0.25));
+    EXPECT_DOUBLE_EQ(0.5, AutomixTransitionMath::incomingEqGainForProgress(0.5));
+    EXPECT_DOUBLE_EQ(0.75, AutomixTransitionMath::incomingEqGainForProgress(0.75));
+    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::incomingEqGainForProgress(1.0));
+}
+
+TEST_F(AutomixTransitionMathTest, EqGainForProgress_AlwaysSumsToUnity) {
+    // Continuous crossfade: at every point the two gains sum to exactly 1.0
+    // (unlike the old instant-swap MVP, which kept both at their endpoints
+    // until the midpoint).
     for (double progress = 0.0; progress <= 1.0; progress += 0.1) {
-        const double outgoing = AutomixTransitionMath::outgoingBassGainForProgress(progress);
-        const double incoming = AutomixTransitionMath::incomingBassGainForProgress(progress);
-        // Exactly one of the two decks has bass at any point in the transition.
-        EXPECT_NE(outgoing, incoming);
+        const double outgoing = AutomixTransitionMath::outgoingEqGainForProgress(progress);
+        const double incoming = AutomixTransitionMath::incomingEqGainForProgress(progress);
+        EXPECT_NEAR(1.0, outgoing + incoming, 1e-9);
+    }
+}
+
+TEST_F(AutomixTransitionMathTest, EqGainForProgress_ClampsOutOfRangeProgress) {
+    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::outgoingEqGainForProgress(-0.5));
+    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::outgoingEqGainForProgress(1.5));
+    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::incomingEqGainForProgress(-0.5));
+    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::incomingEqGainForProgress(1.5));
+}
+
+// --- Filter ("Filter" knob / super1) sweep (added 2026-10-05). ---
+
+TEST_F(AutomixTransitionMathTest, OutgoingFilterForProgress_SweepsNeutralToHighPassEnd) {
+    EXPECT_DOUBLE_EQ(0.5, AutomixTransitionMath::outgoingFilterForProgress(0.0));
+    EXPECT_DOUBLE_EQ(0.75, AutomixTransitionMath::outgoingFilterForProgress(0.5));
+    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::outgoingFilterForProgress(1.0));
+}
+
+TEST_F(AutomixTransitionMathTest, IncomingFilterForProgress_SweepsMildLowPassToNeutral) {
+    EXPECT_DOUBLE_EQ(0.3, AutomixTransitionMath::incomingFilterForProgress(0.0));
+    EXPECT_DOUBLE_EQ(0.4, AutomixTransitionMath::incomingFilterForProgress(0.5));
+    EXPECT_DOUBLE_EQ(0.5, AutomixTransitionMath::incomingFilterForProgress(1.0));
+}
+
+TEST_F(AutomixTransitionMathTest, FilterForProgress_ClampsOutOfRangeProgress) {
+    EXPECT_DOUBLE_EQ(0.5, AutomixTransitionMath::outgoingFilterForProgress(-0.5));
+    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::outgoingFilterForProgress(1.5));
+    EXPECT_DOUBLE_EQ(0.3, AutomixTransitionMath::incomingFilterForProgress(-0.5));
+    EXPECT_DOUBLE_EQ(0.5, AutomixTransitionMath::incomingFilterForProgress(1.5));
+}
+
+TEST_F(AutomixTransitionMathTest, FilterForProgress_StaysWithinUnitRange) {
+    // Both decks' filter values must stay within the CO's own [0, 1] range
+    // throughout the transition -- no overshoot past full HPF/LPF.
+    for (double progress = 0.0; progress <= 1.0; progress += 0.1) {
+        const double outgoing = AutomixTransitionMath::outgoingFilterForProgress(progress);
+        const double incoming = AutomixTransitionMath::incomingFilterForProgress(progress);
+        EXPECT_GE(outgoing, 0.0);
+        EXPECT_LE(outgoing, 1.0);
+        EXPECT_GE(incoming, 0.0);
+        EXPECT_LE(incoming, 1.0);
     }
 }

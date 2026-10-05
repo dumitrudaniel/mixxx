@@ -29,11 +29,25 @@ double AutomixTransitionMath::crossfaderForProgress(double progress, bool fromDe
 }
 
 // static
-double AutomixTransitionMath::outgoingBassGainForProgress(double progress) {
-    return progress < 0.5 ? kBassUnityGain : kBassCutGain;
+double AutomixTransitionMath::outgoingEqGainForProgress(double progress) {
+    const double clamped = std::clamp(progress, 0.0, 1.0);
+    return kEqUnityGain + clamped * (kEqCutGain - kEqUnityGain);
 }
 
 // static
-double AutomixTransitionMath::incomingBassGainForProgress(double progress) {
-    return progress < 0.5 ? kBassCutGain : kBassUnityGain;
+double AutomixTransitionMath::incomingEqGainForProgress(double progress) {
+    const double clamped = std::clamp(progress, 0.0, 1.0);
+    return kEqCutGain + clamped * (kEqUnityGain - kEqCutGain);
+}
+
+// static
+double AutomixTransitionMath::outgoingFilterForProgress(double progress) {
+    const double clamped = std::clamp(progress, 0.0, 1.0);
+    return kFilterNeutral + clamped * (kFilterOutgoingEnd - kFilterNeutral);
+}
+
+// static
+double AutomixTransitionMath::incomingFilterForProgress(double progress) {
+    const double clamped = std::clamp(progress, 0.0, 1.0);
+    return kFilterIncomingStart + clamped * (kFilterNeutral - kFilterIncomingStart);
 }

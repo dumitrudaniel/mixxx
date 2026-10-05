@@ -12,15 +12,20 @@
 // Faza 1.5 -- Automix semiauto (see PLAN.md).
 //
 // Self-contained, Mixxx-C++-only automation of the mechanical part of a DJ
-// transition between deck 1 and deck 2: crossfader sweep + bass swap at the
-// midpoint + enabling Mixxx's own Sync engine on the incoming deck. Cue
-// points, loops and track choice remain fully manual (native Mixxx hotcues/
-// loops) -- this class only drives the fader/EQ/sync mechanics once Dan
-// presses one of the two trigger buttons it exposes.
+// transition between deck 1 and deck 2: crossfader sweep + continuous 3-band
+// EQ fade + filter sweep + enabling Mixxx's own Sync engine on the incoming
+// deck. Cue points, loops and track choice remain fully manual (native Mixxx
+// hotcues/loops) -- this class only drives the fader/EQ/filter/sync
+// mechanics once Dan presses one of the two trigger buttons it exposes.
+//
+// 2026-10-05: upgraded from the original MVP (crossfader sweep + instant
+// low-band-only swap at the midpoint) to continuous 3-band EQ + filter sweep
+// -- see docs/decisions/0008 addendum. The low-band-only instant-swap logic
+// has been removed entirely, replaced by AutomixTransitionMath::
+// outgoing/incomingEqGainForProgress() applied to all three bands.
 //
 // Explicitly out of scope for this MVP (Dan's approval, 2026-10-04):
 //  - Duration selection (hardcoded 2 bars as of 2026-10-05, was 16 bars).
-//  - Filter sweep.
 //  - Any brain/ (Python) involvement -- this lives entirely inside Mixxx.
 //
 // Hardcoded to the 2-deck [Channel1]/[Channel2] case because the SeratoLike
@@ -48,6 +53,14 @@ class AutomixTransitionController : public QObject {
         ControlProxy bpm;
         ControlProxy volume;
         ControlProxy eqLowGain;
+        ControlProxy eqMidGain;
+        ControlProxy eqHighGain;
+        // Quick-filter ("Filter" knob), [QuickEffectRack1_[ChannelN]],super1
+        // -- confirmed in source (effects/backends/builtin/filtereffect.cpp),
+        // not the skin's separate EQ knobs. See automixtransitionmath.h for
+        // the confirmed value range/semantics (0.5 neutral, 1.0 full
+        // high-pass, 0.0 full low-pass).
+        ControlProxy filter;
         ControlProxy syncEnabled;
         ControlProxy syncLeader;
     };
@@ -57,15 +70,18 @@ class AutomixTransitionController : public QObject {
     void cancelTransition(const char* reason);
     void finishTransition();
 
-    // Returns true if any automated control (crossfader, either deck's low
-    // EQ) or any watched-but-not-written control (either deck's volume) has
-    // a current value that no longer matches what this class last wrote /
-    // observed as the baseline -- i.e. a human touched it.
+    // Returns true if any automated control (crossfader, either deck's
+    // low/mid/high EQ, either deck's filter) or any watched-but-not-written
+    // control (either deck's volume) has a current value that no longer
+    // matches what this class last wrote / observed as the baseline -- i.e.
+    // a human touched it.
     bool wasManuallyOverridden() const;
 
     void writeCrossfader(double value);
-    void writeOutgoingBass(double value);
-    void writeIncomingBass(double value);
+    void writeOutgoingEq(double value);
+    void writeIncomingEq(double value);
+    void writeOutgoingFilter(double value);
+    void writeIncomingFilter(double value);
 
     DeckControls m_deck1;
     DeckControls m_deck2;
@@ -94,8 +110,12 @@ class AutomixTransitionController : public QObject {
 
     // Last values *this class* wrote, for manual-override detection.
     double m_lastWrittenCrossfader = 0.0;
-    double m_lastWrittenOutgoingBass = 0.0;
-    double m_lastWrittenIncomingBass = 0.0;
+    // One EQ gain value per deck, applied identically to low/mid/high (all
+    // three bands move together -- see AutomixTransitionMath).
+    double m_lastWrittenOutgoingEq = 0.0;
+    double m_lastWrittenIncomingEq = 0.0;
+    double m_lastWrittenOutgoingFilter = 0.0;
+    double m_lastWrittenIncomingFilter = 0.0;
 
     // Baseline volumes captured at transition start (never written by this
     // class, but watched -- a touch here must also cancel the transition).
