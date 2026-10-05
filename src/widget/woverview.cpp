@@ -732,13 +732,14 @@ void WOverview::paintEvent(QPaintEvent* pEvent) {
         // ScopePainter.
         drawEndOfTrackBackground(&painter);
         drawAxis(&painter);
-        // Per ADR 0016 (mini-overview beat ticks), this small widget does
-        // not need to show the real waveform shape/amplitude at all -- a
-        // minimal beat-tick indicator is sufficient, so the amplitude
-        // pixmap is intentionally not drawn here anymore (was
-        // drawWaveformPixmap(&painter)). The played/unplayed overlay, play
-        // position, cue/loop marks and analyzer progress stay intact since
-        // those remain functionally important for cue/loop work.
+        // Reverted 2026-10-05 (ADR 0016 addendum): Dan tried the beat-tick-
+        // only look live and it read as dense "barcode" noise on longer
+        // tracks (hundreds of beats decluttered into a ~1000px bar is still
+        // very dense) and he doesn't actually use this widget for beat
+        // reference -- just wants it readable and click-to-seek. Reverted to
+        // the original amplitude waveform; drawBeatTicks() is kept (unused)
+        // in case a sparser per-bar variant is wanted later.
+        drawWaveformPixmap(&painter);
         drawPlayedOverlay(&painter);
         drawMinuteMarkers(&painter);
         drawPlayPosition(&painter);
@@ -751,7 +752,6 @@ void WOverview::paintEvent(QPaintEvent* pEvent) {
             const auto gain = static_cast<CSAMPLE_GAIN>(length() - 2) /
                     static_cast<CSAMPLE_GAIN>(trackSamples);
 
-            drawBeatTicks(&painter, offset, gain);
             drawRangeMarks(&painter, offset, gain);
             drawMarks(&painter, offset, gain);
             drawPickupPosition(&painter);
