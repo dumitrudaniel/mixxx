@@ -32,10 +32,13 @@ AutomixTransitionController::DeckControls::DeckControls(const QString& group)
           // mixer/eq_knob_left.xml's <ConfigKey>...,parameter<EqParameter>).
           eqLowGain(QStringLiteral("[EqualizerRack1_") + group + QStringLiteral("_Effect1]"),
                   QStringLiteral("parameter1")),
-          // No parameter2/parameter3 (mid/high) members -- deliberately left
-          // untouched for the whole transition, see the class comment in
-          // automixtransitioncontroller.h (double-attenuation addendum,
-          // 2026-10-05).
+          // parameter2 (Mid) -- EXPERIMENTAL, re-added 2026-10-05 solely for
+          // the symmetric mid-scoop effect (see automixtransitionmath.h,
+          // kMidScoopDepth). No parameter3 (High) member -- the scoop is
+          // deliberately mid-only, and high/low keep their existing
+          // treatment (high untouched, low has its own bass-swap curve).
+          eqMidGain(QStringLiteral("[EqualizerRack1_") + group + QStringLiteral("_Effect1]"),
+                  QStringLiteral("parameter2")),
           // Quick-filter ("Filter" knob) -- confirmed from the skin
           // (mixer/quick_effect_knob_left.xml: KnobComposed bound to
           // <QuickEffectGroup>,super1) and from effects/effectchain.cpp
@@ -158,6 +161,11 @@ void AutomixTransitionController::startTransition(int fromDeckNumber) {
     writeIncomingBass(AutomixTransitionMath::incomingBassGainForProgress(0.0));
     writeOutgoingFilter(AutomixTransitionMath::outgoingFilterForProgress(0.0));
     writeIncomingFilter(AutomixTransitionMath::incomingFilterForProgress(0.0));
+    if (AutomixTransitionMath::kMidScoopDepth > 0.0) {
+        const double midScoop = AutomixTransitionMath::midScoopGainForProgress(0.0);
+        writeOutgoingMidScoop(midScoop);
+        writeIncomingMidScoop(midScoop);
+    }
 
     m_elapsed.start();
     m_timer.start();
@@ -192,6 +200,11 @@ void AutomixTransitionController::slotTick() {
     writeIncomingBass(AutomixTransitionMath::incomingBassGainForProgress(progress));
     writeOutgoingFilter(AutomixTransitionMath::outgoingFilterForProgress(progress));
     writeIncomingFilter(AutomixTransitionMath::incomingFilterForProgress(progress));
+    if (AutomixTransitionMath::kMidScoopDepth > 0.0) {
+        const double midScoop = AutomixTransitionMath::midScoopGainForProgress(progress);
+        writeOutgoingMidScoop(midScoop);
+        writeIncomingMidScoop(midScoop);
+    }
 
     if (progress >= 1.0) {
         finishTransition();
@@ -216,6 +229,18 @@ bool AutomixTransitionController::wasManuallyOverridden() const {
     }
     if (diverged(incoming.filter.get(), m_lastWrittenIncomingFilter)) {
         return true;
+    }
+    // EXPERIMENTAL mid scoop -- only monitored while actually enabled
+    // (kMidScoopDepth > 0.0); when disabled this class never writes
+    // eqMidGain at all, so a human's own mid setting is simply not our
+    // business.
+    if (AutomixTransitionMath::kMidScoopDepth > 0.0) {
+        if (diverged(outgoing.eqMidGain.get(), m_lastWrittenOutgoingMidScoop)) {
+            return true;
+        }
+        if (diverged(incoming.eqMidGain.get(), m_lastWrittenIncomingMidScoop)) {
+            return true;
+        }
     }
     // Volume faders are never written by this class, but touching them
     // during a transition must still cancel it per the safety requirement.
@@ -255,6 +280,18 @@ void AutomixTransitionController::writeIncomingFilter(double value) {
     DeckControls& incoming = (m_fromDeckNumber == 1) ? m_deck2 : m_deck1;
     incoming.filter.set(value);
     m_lastWrittenIncomingFilter = value;
+}
+
+void AutomixTransitionController::writeOutgoingMidScoop(double value) {
+    DeckControls& outgoing = (m_fromDeckNumber == 1) ? m_deck1 : m_deck2;
+    outgoing.eqMidGain.set(value);
+    m_lastWrittenOutgoingMidScoop = value;
+}
+
+void AutomixTransitionController::writeIncomingMidScoop(double value) {
+    DeckControls& incoming = (m_fromDeckNumber == 1) ? m_deck2 : m_deck1;
+    incoming.eqMidGain.set(value);
+    m_lastWrittenIncomingMidScoop = value;
 }
 
 void AutomixTransitionController::finishTransition() {

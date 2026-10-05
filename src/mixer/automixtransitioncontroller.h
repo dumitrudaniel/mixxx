@@ -68,6 +68,13 @@ class AutomixTransitionController : public QObject {
         // why. No eqMidGain/eqHighGain members: this class never reads or
         // writes those COs anymore.
         ControlProxy eqLowGain;
+        // EXPERIMENTAL (2026-10-05, see docs/decisions/0008 addendum): mid
+        // band, re-added solely for the symmetric mid-scoop effect
+        // (AutomixTransitionMath::midScoopGainForProgress). Only
+        // read/written when kMidScoopDepth > 0.0 -- see writeMidScoop() and
+        // wasManuallyOverridden() below. No eqHighGain: the scoop is
+        // deliberately mid-only, see automixtransitionmath.h.
+        ControlProxy eqMidGain;
         // Quick-filter ("Filter" knob), [QuickEffectRack1_[ChannelN]],super1
         // -- confirmed in source (effects/backends/builtin/filtereffect.cpp),
         // not the skin's separate EQ knobs. See automixtransitionmath.h for
@@ -104,6 +111,13 @@ class AutomixTransitionController : public QObject {
     void writeIncomingBass(double bassValue);
     void writeOutgoingFilter(double value);
     void writeIncomingFilter(double value);
+    // EXPERIMENTAL mid scoop (see automixtransitionmath.h kMidScoopDepth doc
+    // comment). No-ops (does not touch the CO at all) when
+    // AutomixTransitionMath::kMidScoopDepth <= 0.0, so setting that constant
+    // to 0.0 truly disables the effect rather than just writing a no-op
+    // value over whatever a human last set manually.
+    void writeOutgoingMidScoop(double value);
+    void writeIncomingMidScoop(double value);
 
     DeckControls m_deck1;
     DeckControls m_deck2;
@@ -139,6 +153,11 @@ class AutomixTransitionController : public QObject {
     double m_lastWrittenIncomingBass = 0.0;
     double m_lastWrittenOutgoingFilter = 0.0;
     double m_lastWrittenIncomingFilter = 0.0;
+    // EXPERIMENTAL mid scoop baselines -- only meaningful/monitored when
+    // AutomixTransitionMath::kMidScoopDepth > 0.0, see
+    // wasManuallyOverridden().
+    double m_lastWrittenOutgoingMidScoop = 0.0;
+    double m_lastWrittenIncomingMidScoop = 0.0;
 
     // Baseline volumes captured at transition start (never written by this
     // class, but watched -- a touch here must also cancel the transition).

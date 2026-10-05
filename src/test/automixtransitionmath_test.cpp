@@ -98,7 +98,43 @@ TEST_F(AutomixTransitionMathTest, BassGainForProgress_ClampsOutOfRangeProgress) 
     EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::incomingBassGainForProgress(1.5));
 }
 
-// --- Filter ("Filter" knob / super1) sweep (added 2026-10-05). ---
+// --- easeInOut() smoothstep helper (added 2026-10-05, filter-sweep-feels-
+// robotic fix). Same endpoints/midpoint as linear, different shape between
+// them. ---
+
+TEST_F(AutomixTransitionMathTest, EaseInOut_EndpointsAndMidpointMatchLinear) {
+    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::easeInOut(0.0));
+    EXPECT_DOUBLE_EQ(0.5, AutomixTransitionMath::easeInOut(0.5));
+    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::easeInOut(1.0));
+}
+
+TEST_F(AutomixTransitionMathTest, EaseInOut_SlowerThanLinearNearEndpoints) {
+    // Smoothstep accelerates away from 0 and decelerates into 1, so at a
+    // quarter of the way through it should have covered LESS ground than
+    // linear (0.25), and symmetrically more than linear at the 3/4 mark.
+    EXPECT_LT(AutomixTransitionMath::easeInOut(0.25), 0.25);
+    EXPECT_GT(AutomixTransitionMath::easeInOut(0.75), 0.75);
+}
+
+TEST_F(AutomixTransitionMathTest, EaseInOut_IsMonotonicNonDecreasing) {
+    double previous = AutomixTransitionMath::easeInOut(0.0);
+    for (double t = 0.05; t <= 1.0; t += 0.05) {
+        const double current = AutomixTransitionMath::easeInOut(t);
+        EXPECT_GE(current, previous);
+        previous = current;
+    }
+}
+
+TEST_F(AutomixTransitionMathTest, EaseInOut_ClampsOutOfRangeInput) {
+    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::easeInOut(-0.5));
+    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::easeInOut(1.5));
+}
+
+// --- Filter ("Filter" knob / super1) sweep (added 2026-10-05). Now eased
+// (see easeInOut() above) rather than linear -- endpoints/midpoint values
+// below are unchanged because easeInOut(0)==0, easeInOut(0.5)==0.5,
+// easeInOut(1)==1, same as plain linear progress at exactly those three
+// points. ---
 
 TEST_F(AutomixTransitionMathTest, OutgoingFilterForProgress_SweepsNeutralToHighPassEnd) {
     EXPECT_DOUBLE_EQ(0.5, AutomixTransitionMath::outgoingFilterForProgress(0.0));
@@ -130,4 +166,46 @@ TEST_F(AutomixTransitionMathTest, FilterForProgress_StaysWithinUnitRange) {
         EXPECT_GE(incoming, 0.0);
         EXPECT_LE(incoming, 1.0);
     }
+}
+
+// --- EXPERIMENTAL symmetric mid-band scoop (added 2026-10-05, see
+// docs/decisions/0008 addendum -- pending Dan's ear-judgment, not a
+// confirmed-good feature like the ones above). Both decks get the SAME
+// value at a given progress (no outgoing/incoming distinction), peaking
+// (lowest gain) at progress=0.5, unity at both ends. ---
+
+TEST_F(AutomixTransitionMathTest, MidScoopGainForProgress_UnityAtBothEnds) {
+    EXPECT_NEAR(1.0, AutomixTransitionMath::midScoopGainForProgress(0.0), 1e-9);
+    EXPECT_NEAR(1.0, AutomixTransitionMath::midScoopGainForProgress(1.0), 1e-9);
+}
+
+TEST_F(AutomixTransitionMathTest, MidScoopGainForProgress_DipsAtMidpointByConfiguredDepth) {
+    const double expected = 1.0 - AutomixTransitionMath::kMidScoopDepth;
+    EXPECT_NEAR(expected, AutomixTransitionMath::midScoopGainForProgress(0.5), 1e-9);
+}
+
+TEST_F(AutomixTransitionMathTest, MidScoopGainForProgress_NeverExceedsConfiguredDepth) {
+    // At no progress should the dip go deeper than kMidScoopDepth below
+    // unity -- it's a mild hump, not anywhere close to a full cut.
+    for (double progress = 0.0; progress <= 1.0; progress += 0.05) {
+        const double value = AutomixTransitionMath::midScoopGainForProgress(progress);
+        EXPECT_GE(value, 1.0 - AutomixTransitionMath::kMidScoopDepth - 1e-9);
+        EXPECT_LE(value, 1.0 + 1e-9);
+    }
+}
+
+TEST_F(AutomixTransitionMathTest, MidScoopGainForProgress_SymmetricAroundMidpoint) {
+    // The hump shape must be symmetric: equal progress-distance from either
+    // end produces the same gain value.
+    EXPECT_NEAR(AutomixTransitionMath::midScoopGainForProgress(0.2),
+            AutomixTransitionMath::midScoopGainForProgress(0.8),
+            1e-9);
+    EXPECT_NEAR(AutomixTransitionMath::midScoopGainForProgress(0.35),
+            AutomixTransitionMath::midScoopGainForProgress(0.65),
+            1e-9);
+}
+
+TEST_F(AutomixTransitionMathTest, MidScoopGainForProgress_ClampsOutOfRangeProgress) {
+    EXPECT_NEAR(1.0, AutomixTransitionMath::midScoopGainForProgress(-0.5), 1e-9);
+    EXPECT_NEAR(1.0, AutomixTransitionMath::midScoopGainForProgress(1.5), 1e-9);
 }

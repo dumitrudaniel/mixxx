@@ -32,11 +32,25 @@
 //    fade identical in shape to the bass curve but spanning the whole
 //    transition (outgoing/incomingEqGainForProgress, now removed); that
 //    function pair is gone, not just unused.
-//  - Filter: each deck's single "Filter" (quick-effect) knob sweeps linearly
-//    over the whole transition, in complementary directions per deck. This
-//    is tonal/spectral shaping (cutoff frequency), not a volume multiplier,
-//    so it is unaffected by the double-attenuation issue above and was left
-//    unchanged.
+//  - Filter: each deck's single "Filter" (quick-effect) knob sweeps over the
+//    whole transition, in complementary directions per deck, through an
+//    ease-in-out curve (see easeInOut() below -- added 2026-10-05 per Dan's
+//    live-test feedback that the raw-linear sweep felt "robotic"; constant-
+//    velocity motion reads as mechanical, eased motion reads as a hand
+//    move). This is tonal/spectral shaping (cutoff frequency), not a volume
+//    multiplier, so it is unaffected by the double-attenuation issue above.
+//  - Mid scoop (EXPERIMENTAL, 2026-10-05, see docs/decisions/0008 addendum):
+//    both decks' mid band dips TOGETHER by a mild amount, peaking at
+//    progress=0.5 and returning to unity at both ends (midScoopGainForProgress
+//    below). This is architecturally different from the removed mid/high
+//    fade above -- it is symmetric (both decks move the same way, not
+//    opposing each other), so it does not reproduce the double-attenuation
+//    bug; it also peaks exactly where the constant-power crossfader is at
+//    its *least* extreme (both decks near equal gain at progress=0.5), not
+//    where either deck's crossfader gain is already low, so it never
+//    compounds with an already-heavy attenuation. Depth is controlled by a
+//    single constant (kMidScoopDepth) that can be set to 0.0 to disable the
+//    effect entirely without removing the code path.
 class AutomixTransitionMath {
   public:
     // Transition length in bars/beats. Revised 16->2 bars 2026-10-05 per
@@ -79,6 +93,15 @@ class AutomixTransitionMath {
     static constexpr double kFilterOutgoingEnd = 1.0; // full high-pass end.
     static constexpr double kFilterIncomingStart = 0.3; // mild low-pass position.
 
+    // EXPERIMENTAL (2026-10-05, pending Dan's ear-judgment -- see
+    // docs/decisions/0008 addendum). Maximum fractional gain reduction of the
+    // symmetric mid-band scoop at its peak (progress=0.5), e.g. 0.2 == at
+    // most a 20% gain cut at the very peak, NOT a full cut. Set to 0.0 to
+    // disable the effect entirely -- the controller skips writing/monitoring
+    // the mid-scoop CO altogether when this is 0.0, so disabling it also
+    // means it never touches a manually-set mid knob.
+    static constexpr double kMidScoopDepth = 0.2;
+
     // Returns the transition duration in seconds for a 2-bar transition at
     // the given outgoing-deck BPM. Returns -1.0 if bpm is not usable (<= 0),
     // which callers must treat as "refuse to start the transition" (e.g. the
@@ -105,11 +128,40 @@ class AutomixTransitionMath {
     static double incomingBassGainForProgress(double progress);
 
     // Quick-filter sweep for the outgoing/incoming deck at a given progress
-    // in [0, 1]. Linear, same curve shape as the EQ/crossfader functions.
-    // Outgoing deck sweeps from neutral toward the high-pass end (sound
-    // "thins out"/fades into the distance). Incoming deck starts at a mild
-    // low-pass position and sweeps back to neutral by the end (sound "comes
-    // into focus").
+    // in [0, 1]. Eased (see easeInOut() below), not linear, as of
+    // 2026-10-05 -- raw-linear motion on a timer read as mechanical in
+    // Dan's live test. Outgoing deck sweeps from neutral toward the
+    // high-pass end (sound "thins out"/fades into the distance). Incoming
+    // deck starts at a mild low-pass position and sweeps back to neutral by
+    // the end (sound "comes into focus"). Start/end values are unchanged
+    // from the linear version -- only the shape of the curve between them
+    // changed.
     static double outgoingFilterForProgress(double progress);
     static double incomingFilterForProgress(double progress);
+
+    // Smoothstep ease-in-out: 3t^2 - 2t^3. Clamps t to [0, 1] first (so
+    // out-of-range input behaves the same as every other function here --
+    // clamp-then-compute). Starts and ends at the same values as linear
+    // (easeInOut(0)==0, easeInOut(0.5)==0.5, easeInOut(1)==1) but
+    // accelerates away from each endpoint and decelerates into the next,
+    // instead of moving at constant velocity -- the standard reason
+    // easing curves read as "natural/hand-performed" where linear
+    // interpolation reads as "robotic". Used by the filter sweep above;
+    // deliberately NOT applied to the crossfader (already constant-power
+    // corrected by Mixxx's own engine, see docs/decisions/0008) or the bass
+    // swap curve (front-loaded shape is a deliberate DJ-technique choice,
+    // not meant to be smoothed into something slower).
+    static double easeInOut(double t);
+
+    // EXPERIMENTAL (2026-10-05, see docs/decisions/0008 addendum and the
+    // kMidScoopDepth doc comment above). Symmetric mid-band gain multiplier
+    // applied identically to BOTH decks regardless of crossfader position or
+    // transition direction -- a hump shape that dips to its lowest point at
+    // progress=0.5 and returns to unity (1.0) at progress=0 and progress=1.
+    // This is NOT a per-deck fade like the removed mid/high EQ automation:
+    // both decks move the same way at the same time, so it does not mirror
+    // or duplicate the crossfader's relative-balance blend between the two
+    // decks. Returns kEqUnityGain (no-op) for every progress when
+    // kMidScoopDepth is 0.0.
+    static double midScoopGainForProgress(double progress);
 };
