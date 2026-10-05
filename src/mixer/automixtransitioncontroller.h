@@ -78,8 +78,11 @@ class AutomixTransitionController : public QObject {
     bool wasManuallyOverridden() const;
 
     void writeCrossfader(double value);
-    void writeOutgoingEq(double value);
-    void writeIncomingEq(double value);
+    // midHighValue drives the mid/high bands (full-duration curve);
+    // bassValue drives the low band separately (front-loaded curve, see
+    // AutomixTransitionMath::outgoing/incomingBassGainForProgress).
+    void writeOutgoingEq(double midHighValue, double bassValue);
+    void writeIncomingEq(double midHighValue, double bassValue);
     void writeOutgoingFilter(double value);
     void writeIncomingFilter(double value);
 
@@ -110,10 +113,13 @@ class AutomixTransitionController : public QObject {
 
     // Last values *this class* wrote, for manual-override detection.
     double m_lastWrittenCrossfader = 0.0;
-    // One EQ gain value per deck, applied identically to low/mid/high (all
-    // three bands move together -- see AutomixTransitionMath).
-    double m_lastWrittenOutgoingEq = 0.0;
-    double m_lastWrittenIncomingEq = 0.0;
+    // Mid/high move together on the full-duration curve; low (bass) moves on
+    // its own front-loaded curve -- see AutomixTransitionMath, 2026-10-05
+    // bass-staggering addendum.
+    double m_lastWrittenOutgoingEqMidHigh = 0.0;
+    double m_lastWrittenIncomingEqMidHigh = 0.0;
+    double m_lastWrittenOutgoingBass = 0.0;
+    double m_lastWrittenIncomingBass = 0.0;
     double m_lastWrittenOutgoingFilter = 0.0;
     double m_lastWrittenIncomingFilter = 0.0;
 
