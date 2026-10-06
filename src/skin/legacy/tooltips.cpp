@@ -615,16 +615,38 @@ void Tooltips::addStandardTooltips() {
                   "selected in Preferences -> Sound Hardware.");
 
     add("automix_transition_to_2")
-            << tr("Automix Transition")
-            << tr("Starts an automated transition from this deck to the other deck "
-                  "(crossfader sweep + bass swap + sync). Touching the crossfader, "
-                  "EQ knobs or either channel's volume fader cancels it.");
+            << tr("Automix")
+            << tr("Mixaj din EQ spre celalalt deck, dupa reteta aleasa. Apasare: "
+                  "armeaza si porneste pe urmatoarea bara (tinut apasat: fortat pe "
+                  "urmatoarea bara). Inca o apasare cat e armat: anulare. Daca "
+                  "piesa noua e oprita, porneste singura din cue, in faza. "
+                  "Crossfader-ul trebuie sa fie la centru. Atingi un knob = acel "
+                  "knob trece pe manual, restul continua.");
 
     add("automix_transition_to_1")
-            << tr("Automix Transition")
-            << tr("Starts an automated transition from this deck to the other deck "
-                  "(crossfader sweep + bass swap + sync). Touching the crossfader, "
-                  "EQ knobs or either channel's volume fader cancels it.");
+            << tr("Automix")
+            << tr("Mixaj din EQ spre celalalt deck, dupa reteta aleasa. Apasare: "
+                  "armeaza si porneste pe urmatoarea bara (tinut apasat: fortat pe "
+                  "urmatoarea bara). Inca o apasare cat e armat: anulare. Daca "
+                  "piesa noua e oprita, porneste singura din cue, in faza. "
+                  "Crossfader-ul trebuie sa fie la centru. Atingi un knob = acel "
+                  "knob trece pe manual, restul continua.");
+
+    add("automix_recipe")
+            << tr("Reteta automix")
+            << tr("Click: urmatoarea reteta (Urgenta 2, Scurt 4, Standard 8, "
+                  "Lung 16, Fade curat). Retetele se editeaza in "
+                  "automix_recipes.json din folderul de setari Mixxx si se "
+                  "recitesc la fiecare MIX.");
+
+    add("automix_countdown")
+            << tr("Automix")
+            << tr("Armat: timpi pana la pornire. In tranzitie: bare ramase.");
+
+    add("automix_resume")
+            << tr("Reia auto")
+            << tr("Aprins = ai preluat manual cel putin un knob in tranzitie. "
+                  "Click: knob-urile preluate revin lin pe curba retetei.");
 
     add("mute")
             << tr("Mute")

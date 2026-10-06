@@ -1,187 +1,196 @@
 #pragma once
 
+#include <QDateTime>
 #include <QElapsedTimer>
 #include <QObject>
+#include <QSharedPointer>
 #include <QTimer>
-#include <memory>
+#include <vector>
 
+#include "control/controlobject.h"
 #include "control/controlproxy.h"
 #include "control/controlpushbutton.h"
+#include "mixer/automixrecipe.h"
+#include "preferences/usersettings.h"
+#include "track/track_decl.h"
 #include "util/class.h"
 
-// Faza 1.5 -- Automix semiauto (see PLAN.md).
+class VisualPlayPosition;
+
+// Automix transition engine between deck 1 and deck 2 (Faza 1.5, rebuilt as
+// Etapa 0 of docs/plan-automix-v2.md, see docs/decisions/0017).
 //
-// Self-contained, Mixxx-C++-only automation of the mechanical part of a DJ
-// transition between deck 1 and deck 2: crossfader sweep (the sole primary
-// volume blend) + low-band-only EQ swap (tonal, avoids bass mud) + filter
-// sweep + a one-shot tempo match (rate_ratio) on the incoming deck. Cue
-// points, loops and track choice remain fully manual (native Mixxx
-// hotcues/loops) -- this class only drives the fader/EQ/filter/tempo
-// mechanics once Dan presses one of the two trigger buttons it exposes.
+// Dan picks the tracks, cue points and loops; MIX does the transition the
+// way he mixes by hand: from the EQs (and optionally the filter), with the
+// crossfader centered and both channel faders up. The controller is a
+// generic executor: everything musical comes from a recipe
+// (mixer/automixrecipe.h) re-read from <settings dir>/automix_recipes.json
+// on every MIX press.
 //
-// 2026-10-05: upgraded from the original MVP (crossfader sweep + instant
-// low-band-only swap at the midpoint) to continuous 3-band EQ + filter sweep,
-// then the mid/high portion of that EQ automation was REMOVED again later
-// the same day after Dan reported a volume "jump" around the transition
-// midpoint -- see docs/decisions/0008 addenda. Root cause: crossfader gain
-// (constant-power) and mid/high EQ gain were both independently attenuating
-// each deck's volume at the same time, compounding multiplicatively into a
-// real dip at progress=0.5 that read as a jump on recovery. Mid/high bands
-// are now left untouched (unity gain, never written by this class) for the
-// whole transition -- the crossfader alone carries their presence. Only the
-// low band keeps its own front-loaded swap curve (AutomixTransitionMath::
-// outgoing/incomingBassGainForProgress), which is NOT redundant with the
-// crossfader: it addresses bass-mud between two simultaneously-playing
-// basslines, a problem that exists regardless of their relative crossfader
-// volume.
+// Flow:
+//  1. MIX press -> armed. Refused (button shows why for 2 s) if the
+//     crossfader is not centered, the outgoing deck is not playing, has no
+//     beatgrid, or the other deck has no track. Arming exits active loops on
+//     both decks, applies the one-shot tempo match, and, if the incoming deck
+//     is stopped, presets its EQs (inaudible: it is not playing yet).
+//     Pressing again while armed disarms.
+//  2. The transition starts on the next bar of the outgoing deck's Mixxx
+//     beatgrid (settings.arm_quantum_bars; holding MIX forces the very next
+//     bar). A stopped incoming deck is started then (Mixxx aligns its phase
+//     on play when quantize is on), so its cue point lands on that bar.
+//  3. Lanes run on a beat clock driven by the outgoing deck's grid position,
+//     not wall time, so phase changes land on grid downbeats even if the
+//     tempo moves (AutomixTransitionMath::clockAdvance()).
+//  4. Touching an automated knob hands THAT knob back (per-lane manual
+//     takeover); the others keep going. "Reia auto" glides every manual lane
+//     back onto its curve.
 //
-// 2026-10-05 (later addendum, "snap to grid destroys manual beatmatching"):
-// tempo matching was REWORKED from continuously-held sync_leader (outgoing)
-// + sync_enabled (incoming) -- Mixxx's own Sync engine -- to a single
-// one-shot rate_ratio write on the incoming deck at transition start. The
-// sync engine's continuous tempo lock also forces ongoing beatgrid-phase
-// correction as an inseparable side effect, which silently snapped/discarded
-// any manual beatmatching or pitch-bend Dan had already done to the incoming
-// track BEFORE pressing MIX, the instant the transition started. The
-// one-shot rate_ratio write only ever changes playback speed (via
-// AutomixTransitionMath::tempoMatchedIncomingRateRatio()); it never reads or
-// writes beat position, so it cannot fight manual alignment, and -- unlike
-// sync_enabled -- it is never held or re-applied after that single write.
-// This class no longer reads or writes sync_leader/sync_enabled at all.
-//
-// Explicitly out of scope for this MVP (Dan's approval, 2026-10-04):
-//  - Duration selection (hardcoded 2 bars as of 2026-10-05, was 16 bars).
-//  - Any brain/ (Python) involvement -- this lives entirely inside Mixxx.
-//
-// Hardcoded to the 2-deck [Channel1]/[Channel2] case because the SeratoLike
-// skin itself is 2-deck only (see docs/decisions/0003). See docs/decisions/0008
-// for the full design writeup, including the manual-override detection
-// strategy (ControlObject has no "claim exclusive ownership" primitive, so
-// this class remembers the last value *it* wrote to each automated control
-// and treats any observed divergence as a human touching it).
+// Never touched: crossfader, channel faders (unless a recipe enables a
+// volume lane), sync. Hardcoded to [Channel1]/[Channel2] because the
+// SeratoLike skin is 2-deck (docs/decisions/0003).
 class AutomixTransitionController : public QObject {
     Q_OBJECT
   public:
-    explicit AutomixTransitionController(QObject* pParent);
-    ~AutomixTransitionController() override = default;
+    // Values of [ChannelN],automix_state, which drives the MIX button's look.
+    enum class ButtonState {
+        Idle = 0,
+        Armed = 1,
+        Running = 2,
+        RefusedCrossfader = 3,
+        RefusedNotPlaying = 4,
+        RefusedNoGrid = 5,
+        RefusedNoTrack = 6,
+    };
+
+    AutomixTransitionController(UserSettingsPointer pConfig, QObject* pParent);
+    ~AutomixTransitionController() override;
 
   private slots:
     void slotTriggerToDeck2(double value);
     void slotTriggerToDeck1(double value);
+    void slotLongPress();
+    void slotResume(double value);
+    void slotClearRefusal();
     void slotTick();
 
   private:
-    struct DeckControls {
-        DeckControls(const QString& group);
-
-        QString group;
-        ControlProxy bpm;
-        ControlProxy volume;
-        // Low band only -- mid/high are deliberately left untouched (unity
-        // gain) for the whole transition, see the class comment above for
-        // why. No eqMidGain/eqHighGain members: this class never reads or
-        // writes those COs anymore.
-        ControlProxy eqLowGain;
-        // EXPERIMENTAL (2026-10-05, see docs/decisions/0008 addendum): mid
-        // band, re-added solely for the symmetric mid-scoop effect
-        // (AutomixTransitionMath::midScoopGainForProgress). Only
-        // read/written when kMidScoopDepth > 0.0 -- see writeMidScoop() and
-        // wasManuallyOverridden() below. No eqHighGain: the scoop is
-        // deliberately mid-only, see automixtransitionmath.h.
-        ControlProxy eqMidGain;
-        // Quick-filter ("Filter" knob), [QuickEffectRack1_[ChannelN]],super1
-        // -- confirmed in source (effects/backends/builtin/filtereffect.cpp),
-        // not the skin's separate EQ knobs. See automixtransitionmath.h for
-        // the confirmed value range/semantics (0.5 neutral, 1.0 full
-        // high-pass, 0.0 full low-pass).
-        ControlProxy filter;
-        // [ChannelN],rate_ratio -- the live playback-speed multiplier such
-        // that effective bpm == local (unstretched) bpm * rate_ratio
-        // (confirmed in engine/controls/bpmcontrol.cpp,
-        // slotUpdateEngineBpm()/[ChannelN],bpm wiring, and
-        // engine/controls/ratecontrol.cpp). Used ONCE, at transition start,
-        // to tempo-match the incoming deck to the outgoing deck's current
-        // bpm -- see AutomixTransitionMath::tempoMatchedIncomingRateRatio()
-        // and the class comment above. Never re-read/re-written afterward;
-        // this is deliberately NOT part of the per-tick automation loop.
-        ControlProxy rateRatio;
-        // Loop exit, added 2026-10-06 per Dan's request: pressing MIX should
-        // drop any active loop on BOTH decks (not just the one he's looking
-        // at), so a transition never starts with a deck stuck looping.
-        // loop_enabled is a read-only state CO (1 while a loop is active);
-        // reloop_toggle is the push-button that exits it when active (it's
-        // aliased from reloop_exit -- confirmed in
-        // engine/controls/loopingcontrol.cpp). Only pulsed when loop_enabled
-        // is actually 1, so it never ACTIVATES a loop that wasn't running.
-        ControlProxy loopEnabled;
-        ControlProxy reloopToggle;
+    enum class State {
+        Idle,
+        Armed,
+        Running,
     };
 
-    // fromDeckNumber is 1 or 2; the other deck is the transition target.
-    void startTransition(int fromDeckNumber);
-    void cancelTransition(const char* reason);
-    void finishTransition();
+    struct DeckControls {
+        explicit DeckControls(const QString& group);
 
-    // Returns true if any automated control (crossfader, either deck's low
-    // EQ, either deck's filter) or any watched-but-not-written control
-    // (either deck's volume) has a current value that no longer matches what
-    // this class last wrote / observed as the baseline -- i.e. a human
-    // touched it. Mid/high EQ is deliberately NOT monitored: this class
-    // never writes those COs, so a human touching them during a transition
-    // is an independent action, not an override of our automation.
-    bool wasManuallyOverridden() const;
+        ControlProxy* control(AutomixParam param);
 
-    void writeCrossfader(double value);
-    // Low band only (front-loaded curve, see AutomixTransitionMath::
-    // outgoing/incomingBassGainForProgress). Mid/high are never written.
-    void writeOutgoingBass(double bassValue);
-    void writeIncomingBass(double bassValue);
-    void writeOutgoingFilter(double value);
-    void writeIncomingFilter(double value);
-    // EXPERIMENTAL mid scoop (see automixtransitionmath.h kMidScoopDepth doc
-    // comment). No-ops (does not touch the CO at all) when
-    // AutomixTransitionMath::kMidScoopDepth <= 0.0, so setting that constant
-    // to 0.0 truly disables the effect rather than just writing a no-op
-    // value over whatever a human last set manually.
-    void writeOutgoingMidScoop(double value);
-    void writeIncomingMidScoop(double value);
+        QString group;
+        ControlProxy play;
+        ControlProxy bpm;
+        ControlProxy rateRatio;
+        ControlProxy trackSamples;
+        ControlProxy volume;
+        ControlProxy eqLow;
+        ControlProxy eqMid;
+        ControlProxy eqHigh;
+        // [QuickEffectRack1_[ChannelN]],super1: 0.5 neutral, -> 1.0 HPF, -> 0.0 LPF.
+        ControlProxy filter;
+        // loop_enabled is a state CO; reloop_toggle (alias reloop_exit)
+        // exits an active loop. Only pulsed when a loop is active, so MIX
+        // never starts a loop.
+        ControlProxy loopEnabled;
+        ControlProxy reloopToggle;
+        QSharedPointer<VisualPlayPosition> pVisualPlayPos;
+    };
+
+    struct LaneRuntime {
+        AutomixLane lane;
+        ControlProxy* pControl = nullptr;
+        double startValue = 0.0;
+        double lastWritten = 0.0;
+        bool manual = false;
+        bool gliding = false;
+        double glideFrom = 0.0;
+        double glideStartBeat = 0.0;
+        double glideBeats = 0.0;
+    };
+
+    void onTrigger(int fromDeckNumber, double value);
+    void arm(int fromDeckNumber);
+    void disarm();
+    void start();
+    void finish();
+    void abort();
+    void refuse(int fromDeckNumber, ButtonState reason);
+    void setButtonState(int deckNumber, ButtonState state);
+    void reloadRecipesIfChanged();
+    void writeLanes();
+    bool tracksChanged() const;
+
+    // Outgoing deck position in beats from its grid anchor (Mixxx's first
+    // downbeat = beat 0), fractional. False if there is no track, beatgrid
+    // or valid play position.
+    bool readGridBeat(DeckControls& deck, double* pBeat) const;
+
+    DeckControls& deck(int deckNumber) {
+        return deckNumber == 1 ? m_deck1 : m_deck2;
+    }
+    DeckControls& outgoingDeck() {
+        return deck(m_fromDeckNumber);
+    }
+    DeckControls& incomingDeck() {
+        return deck(m_fromDeckNumber == 1 ? 2 : 1);
+    }
+
+    UserSettingsPointer m_pConfig;
+    QString m_recipeFilePath;
+    QDateTime m_recipeFileModified;
+    qint64 m_recipeFileSize = -1;
+    AutomixRecipeBook m_book;
 
     DeckControls m_deck1;
     DeckControls m_deck2;
     ControlProxy m_crossfader;
 
-    // New trigger ControlObjects exposed to the skin/controllers:
-    //   [Channel1],automix_transition_to_2  -- starts deck1 -> deck2
-    //   [Channel2],automix_transition_to_1  -- starts deck2 -> deck1
+    // [Channel1],automix_transition_to_2 / [Channel2],automix_transition_to_1
     ControlPushButton m_triggerToDeck2;
     ControlPushButton m_triggerToDeck1;
+    // [ChannelN],automix_state -- see ButtonState.
+    ControlObject m_buttonStateDeck1;
+    ControlObject m_buttonStateDeck2;
+    // [AutomixTransition],state: 0 idle, 1 armed, 2 running.
+    ControlObject m_engineState;
+    // [AutomixTransition],countdown: armed -> beats until start, running ->
+    // bars left.
+    ControlObject m_countdown;
+    // [AutomixTransition],manual: 1 while any lane is under manual control.
+    ControlObject m_manual;
+    // [AutomixTransition],resume: "Reia auto".
+    ControlPushButton m_resume;
+    // [AutomixTransition],recipe: selector slot (AutomixRecipeBook::selectorIds()),
+    // persisted, cycled by the skin button.
+    ControlPushButton m_recipeSelector;
 
-    QTimer m_timer;
-    QElapsedTimer m_elapsed;
+    QTimer m_tickTimer;
+    QTimer m_longPressTimer;
+    QTimer m_refusalTimer;
+    QElapsedTimer m_tickClock;
 
-    bool m_active = false;
-    int m_fromDeckNumber = 0; // 1 or 2 while active, 0 when idle
-    double m_durationSeconds = 0.0;
-
-    // Last values *this class* wrote, for manual-override detection.
-    double m_lastWrittenCrossfader = 0.0;
-    // Low (bass) moves on its own front-loaded curve -- see
-    // AutomixTransitionMath, 2026-10-05 bass-staggering addendum. Mid/high
-    // have no equivalent here: they are never written (see class comment).
-    double m_lastWrittenOutgoingBass = 0.0;
-    double m_lastWrittenIncomingBass = 0.0;
-    double m_lastWrittenOutgoingFilter = 0.0;
-    double m_lastWrittenIncomingFilter = 0.0;
-    // EXPERIMENTAL mid scoop baselines -- only meaningful/monitored when
-    // AutomixTransitionMath::kMidScoopDepth > 0.0, see
-    // wasManuallyOverridden().
-    double m_lastWrittenOutgoingMidScoop = 0.0;
-    double m_lastWrittenIncomingMidScoop = 0.0;
-
-    // Baseline volumes captured at transition start (never written by this
-    // class, but watched -- a touch here must also cancel the transition).
-    double m_baselineOutgoingVolume = 0.0;
-    double m_baselineIncomingVolume = 0.0;
+    State m_state = State::Idle;
+    int m_fromDeckNumber = 0;
+    int m_pressedDeckNumber = 0;
+    // Copy of the recipe in use, so a hot reload never changes a running
+    // transition.
+    AutomixRecipe m_recipe;
+    double m_armGridBeat = 0.0;
+    double m_startGridBeat = 0.0;
+    double m_lastGridBeat = 0.0;
+    double m_transitionBeat = 0.0;
+    bool m_incomingNeedsPlay = false;
+    TrackPointer m_pOutgoingTrack;
+    TrackPointer m_pIncomingTrack;
+    std::vector<LaneRuntime> m_lanes;
 
     DISALLOW_COPY_AND_ASSIGN(AutomixTransitionController);
 };

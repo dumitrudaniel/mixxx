@@ -405,7 +405,7 @@ void PlayerManager::addDeckInner() {
     // [Channel1]/[Channel2] (the SeratoLike skin is 2-deck only, see
     // docs/decisions/0003), so construct the controller as soon as both exist.
     if (m_decks.size() == 2 && !m_pAutomixTransitionController) {
-        m_pAutomixTransitionController = new AutomixTransitionController(this);
+        m_pAutomixTransitionController = new AutomixTransitionController(m_pConfig, this);
     }
 }
 
