@@ -1,0 +1,246 @@
+#include "mixer/automixrecipe.h"
+
+#include <gtest/gtest.h>
+
+#include <cmath>
+
+namespace {
+
+const AutomixLane* findLane(
+        const AutomixRecipe& recipe, AutomixDeckRole deck, AutomixParam param) {
+    for (const AutomixLane& lane : recipe.lanes) {
+        if (lane.deck == deck && lane.param == param) {
+            return &lane;
+        }
+    }
+    return nullptr;
+}
+
+// Minimal valid file with one recipe whose lanes are given as JSON text.
+QByteArray recipeFile(const char* lanesJson, const char* extraRecipeFields = "") {
+    return QByteArray(R"({"version": 1, "settings": {"arm_quantum_bars": 4},
+        "recipes": [{"id": "t", "length_bars": 2, )") +
+            extraRecipeFields + R"( "lanes": [)" + lanesJson + "]}]}";
+}
+
+} // namespace
+
+class AutomixRecipeTest : public testing::Test {
+};
+
+TEST_F(AutomixRecipeTest, BuiltinParsesWithAllSelectorRecipes) {
+    AutomixRecipeBook book;
+    QString error;
+    ASSERT_TRUE(AutomixRecipeBook::parse(AutomixRecipeBook::builtinJson(), &book, &error))
+            << error.toStdString();
+    EXPECT_EQ(5, book.size());
+    for (const QString& id : AutomixRecipeBook::selectorIds()) {
+        EXPECT_NE(nullptr, book.find(id)) << id.toStdString();
+    }
+    EXPECT_DOUBLE_EQ(1.0, book.armQuantumBars());
+    EXPECT_DOUBLE_EQ(1.0, book.resumeGlideBeats());
+    EXPECT_EQ(5, AutomixRecipeBook::builtin().size());
+}
+
+TEST_F(AutomixRecipeTest, DefaultSelectorSlotIsStandard8) {
+    const AutomixRecipe* pRecipe = AutomixRecipeBook::builtin().forSelectorIndex(
+            AutomixRecipeBook::kDefaultSelectorIndex);
+    ASSERT_NE(nullptr, pRecipe);
+    EXPECT_EQ(QStringLiteral("standard8"), pRecipe->id);
+    EXPECT_DOUBLE_EQ(32.0, pRecipe->lengthBeats);
+    // Filter and volume lanes ship disabled: six EQ lanes remain.
+    EXPECT_EQ(6u, pRecipe->lanes.size());
+    EXPECT_TRUE(pRecipe->tempoMatch);
+    EXPECT_TRUE(pRecipe->autoPlayIncoming);
+    EXPECT_EQ(3u, pRecipe->prepareIncoming.size());
+}
+
+TEST_F(AutomixRecipeTest, Standard8FollowsThePlan) {
+    const AutomixRecipe& r = *AutomixRecipeBook::builtin().find(QStringLiteral("standard8"));
+    const AutomixLane* inMid = findLane(r, AutomixDeckRole::Incoming, AutomixParam::EqMid);
+    const AutomixLane* inHigh = findLane(r, AutomixDeckRole::Incoming, AutomixParam::EqHigh);
+    const AutomixLane* inLow = findLane(r, AutomixDeckRole::Incoming, AutomixParam::EqLow);
+    const AutomixLane* outLow = findLane(r, AutomixDeckRole::Outgoing, AutomixParam::EqLow);
+    const AutomixLane* outHigh = findLane(r, AutomixDeckRole::Outgoing, AutomixParam::EqHigh);
+    const AutomixLane* outMid = findLane(r, AutomixDeckRole::Outgoing, AutomixParam::EqMid);
+    ASSERT_TRUE(inMid && inHigh && inLow && outLow && outHigh && outMid);
+    EXPECT_EQ(nullptr, findLane(r, AutomixDeckRole::Outgoing, AutomixParam::Filter));
+
+    // Phase 1 (bars 0-4): incoming mids rise from kill, bass stays cut,
+    // highs only reach -12 dB; outgoing untouched.
+    EXPECT_DOUBLE_EQ(0.0, inMid->valueAt(0.0, 0.0));
+    EXPECT_NEAR(1.0, inMid->valueAt(16.0, 0.0), 1e-12);
+    EXPECT_DOUBLE_EQ(0.0, inLow->valueAt(15.9, 0.0));
+    EXPECT_NEAR(0.2512, inHigh->valueAt(16.0, 0.0), 1e-4);
+    EXPECT_DOUBLE_EQ(1.0, outLow->valueAt(15.9, 1.0));
+    EXPECT_DOUBLE_EQ(1.0, outMid->valueAt(15.9, 1.0));
+
+    // Phase 2 (downbeat of bar 4): bass swaps in one beat, highs in one bar.
+    EXPECT_NEAR(0.0, outLow->valueAt(17.0, 1.0), 1e-12);
+    EXPECT_NEAR(1.0, inLow->valueAt(17.0, 0.0), 1e-12);
+    EXPECT_GT(outHigh->valueAt(17.0, 1.0), 0.0);
+    EXPECT_NEAR(0.0, outHigh->valueAt(20.0, 1.0), 1e-12);
+    EXPECT_NEAR(1.0, inHigh->valueAt(20.0, 0.0), 1e-12);
+
+    // Phase 3 (bars 4-8): outgoing mids fall to kill.
+    EXPECT_GT(outMid->valueAt(24.0, 1.0), 0.0);
+    EXPECT_NEAR(0.0, outMid->valueAt(32.0, 1.0), 1e-12);
+}
+
+TEST_F(AutomixRecipeTest, Standard8BassSwapIsEqualPower) {
+    const AutomixRecipe& r = *AutomixRecipeBook::builtin().find(QStringLiteral("standard8"));
+    const AutomixLane* inLow = findLane(r, AutomixDeckRole::Incoming, AutomixParam::EqLow);
+    const AutomixLane* outLow = findLane(r, AutomixDeckRole::Outgoing, AutomixParam::EqLow);
+    for (int i = 0; i <= 10; ++i) {
+        const double beat = 16.0 + i / 10.0;
+        const double out = outLow->valueAt(beat, 1.0);
+        const double in = inLow->valueAt(beat, 0.0);
+        EXPECT_NEAR(1.0, out * out + in * in, 1e-9) << "beat=" << beat;
+    }
+}
+
+TEST_F(AutomixRecipeTest, LanesRampFromTheKnobsCurrentValue) {
+    const AutomixRecipe& r = *AutomixRecipeBook::builtin().find(QStringLiteral("standard8"));
+    const AutomixLane* outLow = findLane(r, AutomixDeckRole::Outgoing, AutomixParam::EqLow);
+    const AutomixLane* inMid = findLane(r, AutomixDeckRole::Incoming, AutomixParam::EqMid);
+    // Dan left the outgoing bass at 0.8: it holds there, no jump to 1.0.
+    EXPECT_DOUBLE_EQ(0.8, outLow->valueAt(0.0, 0.8));
+    EXPECT_DOUBLE_EQ(0.8, outLow->valueAt(10.0, 0.8));
+    // Incoming mids already half up: the ramp starts from 0.5.
+    EXPECT_DOUBLE_EQ(0.5, inMid->valueAt(0.0, 0.5));
+    EXPECT_GT(inMid->valueAt(4.0, 0.5), 0.5);
+}
+
+TEST_F(AutomixRecipeTest, FadeCuratSkipsTempoMatchAndStartsIncomingLate) {
+    const AutomixRecipe& r = *AutomixRecipeBook::builtin().find(QStringLiteral("fade_curat"));
+    EXPECT_FALSE(r.tempoMatch);
+    EXPECT_DOUBLE_EQ(6.0, r.incomingPlayAtBeat);
+    EXPECT_DOUBLE_EQ(8.0, r.lengthBeats);
+}
+
+TEST_F(AutomixRecipeTest, ValueAtHoldsOutsideThePoints) {
+    AutomixRecipeBook book;
+    QString error;
+    ASSERT_TRUE(AutomixRecipeBook::parse(recipeFile(R"(
+        {"deck": "outgoing", "param": "eq_mid", "points": [
+            {"beat": 2, "value": 0.5, "shape": "linear"},
+            {"beat": 6, "value": 0.1}]})"),
+            &book,
+            &error))
+            << error.toStdString();
+    const AutomixLane& lane = book.find(QStringLiteral("t"))->lanes.front();
+    // An implicit "current" point at beat 0 is prepended.
+    ASSERT_EQ(3u, lane.points.size());
+    EXPECT_TRUE(lane.points.front().useStartValue);
+    EXPECT_DOUBLE_EQ(0.9, lane.valueAt(-1.0, 0.9));
+    EXPECT_DOUBLE_EQ(0.7, lane.valueAt(1.0, 0.9));
+    EXPECT_DOUBLE_EQ(0.3, lane.valueAt(4.0, 0.9));
+    EXPECT_DOUBLE_EQ(0.1, lane.valueAt(6.0, 0.9));
+    EXPECT_DOUBLE_EQ(0.1, lane.valueAt(99.0, 0.9));
+}
+
+TEST_F(AutomixRecipeTest, PointsOnTheSameBeatJump) {
+    AutomixRecipeBook book;
+    QString error;
+    ASSERT_TRUE(AutomixRecipeBook::parse(recipeFile(R"(
+        {"deck": "incoming", "param": "eq_low", "points": [
+            {"beat": 0, "value": "kill"},
+            {"beat": 4, "value": "kill"},
+            {"beat": 4, "value": "unity"}]})"),
+            &book,
+            &error))
+            << error.toStdString();
+    const AutomixLane& lane = book.find(QStringLiteral("t"))->lanes.front();
+    EXPECT_DOUBLE_EQ(0.0, lane.valueAt(3.99, 0.5));
+    EXPECT_DOUBLE_EQ(1.0, lane.valueAt(4.0, 0.5));
+}
+
+TEST_F(AutomixRecipeTest, ParsesNamedAndDecibelValues) {
+    AutomixRecipeBook book;
+    QString error;
+    ASSERT_TRUE(AutomixRecipeBook::parse(recipeFile(R"(
+        {"deck": "incoming", "param": "eq_high", "points": [
+            {"bar": 0, "value": "-6 dB"}, {"bar": 1, "value": "+3dB"}]},
+        {"deck": "outgoing", "param": "filter", "points": [
+            {"bar": 0, "value": "neutral"}, {"bar": 2, "value": 0.75, "shape": "smoothstep"}]})",
+                                                    R"("prepare_incoming": {"eq_low": "kill"},)"),
+            &book,
+            &error))
+            << error.toStdString();
+    const AutomixRecipe& r = *book.find(QStringLiteral("t"));
+    EXPECT_NEAR(0.5012, r.lanes[0].points[0].value, 1e-4);
+    EXPECT_NEAR(1.4125, r.lanes[0].points[1].value, 1e-4);
+    EXPECT_DOUBLE_EQ(0.5, r.lanes[1].points[0].value);
+    ASSERT_EQ(1u, r.prepareIncoming.size());
+    EXPECT_DOUBLE_EQ(0.0, r.prepareIncoming[0].value);
+    EXPECT_DOUBLE_EQ(4.0, book.armQuantumBars());
+}
+
+TEST_F(AutomixRecipeTest, DisabledLanesAreDropped) {
+    AutomixRecipeBook book;
+    QString error;
+    ASSERT_TRUE(AutomixRecipeBook::parse(recipeFile(R"(
+        {"deck": "incoming", "param": "volume", "enabled": false, "points": [
+            {"bar": 0, "value": "-2dB"}, {"bar": 1, "value": "current"}]})"),
+            &book,
+            &error))
+            << error.toStdString();
+    EXPECT_TRUE(book.find(QStringLiteral("t"))->lanes.empty());
+}
+
+TEST_F(AutomixRecipeTest, RejectsBrokenFilesAndKeepsTheOldBook) {
+    const QList<QByteArray> broken = {
+            QByteArray("{not json"),
+            QByteArray(R"({"version": 2, "recipes": []})"),
+            recipeFile(R"({"deck": "left", "param": "eq_low", "points": [{"bar": 0, "value": 1}]})"),
+            recipeFile(R"({"deck": "incoming", "param": "eq_bass", "points": [{"bar": 0, "value": 1}]})"),
+            recipeFile(R"({"deck": "incoming", "param": "eq_low", "points": [
+                {"bar": 0, "value": 1}, {"bar": 1, "value": 0, "shape": "wobble"}]})"),
+            recipeFile(R"({"deck": "incoming", "param": "eq_low", "points": [
+                {"bar": 1, "value": 1}, {"bar": 0.5, "value": 0}]})"),
+            recipeFile(R"({"deck": "incoming", "param": "eq_low", "points": [
+                {"bar": 3, "value": 1}]})"),
+            recipeFile(R"({"deck": "incoming", "param": "eq_low", "points": [
+                {"bar": 0, "value": 5}]})"),
+            recipeFile(R"({"deck": "incoming", "param": "filter", "points": [
+                {"bar": 0, "value": 1.5}]})"),
+            recipeFile(R"({"deck": "incoming", "param": "eq_low", "points": [
+                {"bar": 0, "value": "loud"}]})"),
+            recipeFile(R"({"deck": "incoming", "param": "eq_low", "points": []})"),
+            recipeFile(R"({"deck": "incoming", "param": "eq_low", "points": [{"bar": 0, "value": 1}]},
+                          {"deck": "incoming", "param": "eq_low", "points": [{"bar": 0, "value": 0}]})"),
+            recipeFile(R"({"deck": "incoming", "param": "eq_low", "points": [{"bar": 0, "value": 1}]})",
+                    R"("prepare_incoming": {"eq_low": "current"},)"),
+            recipeFile(R"({"deck": "incoming", "param": "eq_low", "points": [{"bar": 0, "value": 1}]})",
+                    R"("incoming_play_at_bar": 5,)"),
+            QByteArray(R"({"version": 1, "recipes": [{"id": "a", "length_bars": 1, "lanes": []},
+                {"id": "a", "length_bars": 2, "lanes": []}]})"),
+            QByteArray(R"({"version": 1, "recipes": [{"id": "a", "length_bars": 0, "lanes": []}]})"),
+            QByteArray(R"({"version": 1, "settings": {"arm_quantum_bars": 0}, "recipes": []})"),
+    };
+    for (const QByteArray& json : broken) {
+        AutomixRecipeBook book = AutomixRecipeBook::builtin();
+        QString error;
+        EXPECT_FALSE(AutomixRecipeBook::parse(json, &book, &error)) << json.toStdString();
+        EXPECT_FALSE(error.isEmpty()) << json.toStdString();
+        EXPECT_EQ(5, book.size()) << json.toStdString();
+    }
+}
+
+TEST_F(AutomixRecipeTest, SelectorFallsBackToBuiltinRecipes) {
+    AutomixRecipeBook book;
+    QString error;
+    ASSERT_TRUE(AutomixRecipeBook::parse(
+            QByteArray(R"({"version": 1, "recipes": [
+                {"id": "standard8", "name": "Mine", "length_bars": 6, "lanes": []}]})"),
+            &book,
+            &error))
+            << error.toStdString();
+    // The user's own standard8 wins.
+    EXPECT_EQ(QStringLiteral("Mine"), book.forSelectorIndex(2)->name);
+    // Slots missing from the file use the built-in recipe.
+    ASSERT_NE(nullptr, book.forSelectorIndex(3));
+    EXPECT_EQ(QStringLiteral("lung16"), book.forSelectorIndex(3)->id);
+    // Out of range -> default slot.
+    EXPECT_EQ(QStringLiteral("standard8"), book.forSelectorIndex(42)->id);
+}

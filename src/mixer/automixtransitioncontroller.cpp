@@ -1,66 +1,113 @@
 #include "mixer/automixtransitioncontroller.h"
 
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QtDebug>
+#include <cmath>
+
 #include "mixer/automixtransitionmath.h"
+#include "mixer/playerinfo.h"
 #include "moc_automixtransitioncontroller.cpp"
-#include "util/math.h"
+#include "track/track.h"
+#include "waveform/visualplayposition.h"
 
 namespace {
-// Tick rate for the crossfader/EQ interpolation. 50ms (20Hz) is smooth enough
-// for a fader move and cheap enough to not matter -- this is UI-rate
-// automation, not an audio-rate DSP process (that stays entirely inside
-// Mixxx's existing engine buffer callbacks, untouched by this class).
-constexpr int kTimerIntervalMs = 50;
+const QString kEngineGroup = QStringLiteral("[AutomixTransition]");
+const QString kRecipeFileName = QStringLiteral("automix_recipes.json");
 
-// Tolerance for comparing a CO's current value against the value this class
-// last wrote (or, for volume, the baseline captured at transition start).
-// ControlObject values are doubles; a human touching a slider/knob always
-// produces a visible jump well above float rounding noise.
-constexpr double kOverrideTolerance = 1e-6;
+// 50 Hz: a one-beat bass swap at 105 BPM lasts ~0.57 s, i.e. ~28 steps.
+constexpr int kTickIntervalMs = 20;
+// Holding MIX this long forces the start onto the very next bar.
+constexpr int kLongPressMs = 450;
+// How long a refusal reason stays on the MIX button.
+constexpr int kRefusalDisplayMs = 2000;
+// A press this late after a bar boundary still starts on that boundary.
+constexpr double kStartGraceBeats = 0.1;
+// MIX mixes from the EQs with the crossfader centered; it refuses rather than
+// moving a crossfader someone left off-center.
+constexpr double kCrossfaderCenterTolerance = 0.05;
+// A knob whose value differs from what this class last wrote by more than
+// this was touched by a human (any knob/mouse step is far larger).
+constexpr double kOverrideTolerance = 1e-4;
 
 bool diverged(double a, double b) {
     return std::abs(a - b) > kOverrideTolerance;
+}
+
+double stateValue(AutomixTransitionController::ButtonState state) {
+    return static_cast<double>(static_cast<int>(state));
 }
 } // namespace
 
 AutomixTransitionController::DeckControls::DeckControls(const QString& group)
         : group(group),
+          play(group, QStringLiteral("play")),
           bpm(group, QStringLiteral("bpm")),
+          rateRatio(group, QStringLiteral("rate_ratio")),
+          trackSamples(group, QStringLiteral("track_samples")),
           volume(group, QStringLiteral("volume")),
-          // parameter1/2/3 on the per-deck EqualizerRack1 effect == Low/Mid/
-          // High respectively -- confirmed from the skin's EQ knob mapping
-          // (mixer/channel_left.xml: EqParameter 1/2/3 -> Low/Mid/High via
-          // mixer/eq_knob_left.xml's <ConfigKey>...,parameter<EqParameter>).
-          eqLowGain(QStringLiteral("[EqualizerRack1_") + group + QStringLiteral("_Effect1]"),
+          // parameter1/2/3 of the per-deck EqualizerRack1 effect == Low/Mid/High
+          // (skin: mixer/eq_knob_left.xml). Value = linear band gain, 1.0 unity,
+          // 0.0 full kill with the default Biquad Full Kill EQ.
+          eqLow(QStringLiteral("[EqualizerRack1_") + group + QStringLiteral("_Effect1]"),
                   QStringLiteral("parameter1")),
-          // parameter2 (Mid) -- EXPERIMENTAL, re-added 2026-10-05 solely for
-          // the symmetric mid-scoop effect (see automixtransitionmath.h,
-          // kMidScoopDepth). No parameter3 (High) member -- the scoop is
-          // deliberately mid-only, and high/low keep their existing
-          // treatment (high untouched, low has its own bass-swap curve).
-          eqMidGain(QStringLiteral("[EqualizerRack1_") + group + QStringLiteral("_Effect1]"),
+          eqMid(QStringLiteral("[EqualizerRack1_") + group + QStringLiteral("_Effect1]"),
                   QStringLiteral("parameter2")),
-          // Quick-filter ("Filter" knob) -- confirmed from the skin
-          // (mixer/quick_effect_knob_left.xml: KnobComposed bound to
-          // <QuickEffectGroup>,super1) and from effects/effectchain.cpp
-          // (m_pControlChainSuperParameter is a ControlPotmeter with range
-          // [0.0, 1.0]). This is the single combined LPF/HPF "Filter" knob,
-          // NOT the 3-band EQ knobs above.
+          eqHigh(QStringLiteral("[EqualizerRack1_") + group + QStringLiteral("_Effect1]"),
+                  QStringLiteral("parameter3")),
           filter(QStringLiteral("[QuickEffectRack1_") + group + QStringLiteral("]"),
                   QStringLiteral("super1")),
-          rateRatio(group, QStringLiteral("rate_ratio")),
           loopEnabled(group, QStringLiteral("loop_enabled")),
-          reloopToggle(group, QStringLiteral("reloop_toggle")) {
+          reloopToggle(group, QStringLiteral("reloop_toggle")),
+          // Created by the deck's EngineBuffer, which exists before this
+          // controller (PlayerManager builds it after the second deck).
+          pVisualPlayPos(VisualPlayPosition::getVisualPlayPosition(group)) {
 }
 
-AutomixTransitionController::AutomixTransitionController(QObject* pParent)
+ControlProxy* AutomixTransitionController::DeckControls::control(AutomixParam param) {
+    switch (param) {
+    case AutomixParam::EqLow:
+        return &eqLow;
+    case AutomixParam::EqMid:
+        return &eqMid;
+    case AutomixParam::EqHigh:
+        return &eqHigh;
+    case AutomixParam::Filter:
+        return &filter;
+    case AutomixParam::Volume:
+        return &volume;
+    }
+    return &eqMid;
+}
+
+AutomixTransitionController::AutomixTransitionController(
+        UserSettingsPointer pConfig, QObject* pParent)
         : QObject(pParent),
+          m_pConfig(pConfig),
+          m_recipeFilePath(QDir(pConfig->getSettingsPath()).filePath(kRecipeFileName)),
+          m_book(AutomixRecipeBook::builtin()),
           m_deck1(QStringLiteral("[Channel1]")),
           m_deck2(QStringLiteral("[Channel2]")),
           m_crossfader(QStringLiteral("[Master]"), QStringLiteral("crossfader")),
           m_triggerToDeck2(ConfigKey(QStringLiteral("[Channel1]"),
                   QStringLiteral("automix_transition_to_2"))),
           m_triggerToDeck1(ConfigKey(QStringLiteral("[Channel2]"),
-                  QStringLiteral("automix_transition_to_1"))) {
+                  QStringLiteral("automix_transition_to_1"))),
+          m_buttonStateDeck1(ConfigKey(QStringLiteral("[Channel1]"),
+                  QStringLiteral("automix_state"))),
+          m_buttonStateDeck2(ConfigKey(QStringLiteral("[Channel2]"),
+                  QStringLiteral("automix_state"))),
+          m_engineState(ConfigKey(kEngineGroup, QStringLiteral("state"))),
+          m_countdown(ConfigKey(kEngineGroup, QStringLiteral("countdown"))),
+          m_manual(ConfigKey(kEngineGroup, QStringLiteral("manual"))),
+          m_resume(ConfigKey(kEngineGroup, QStringLiteral("resume"))),
+          m_recipeSelector(ConfigKey(kEngineGroup, QStringLiteral("recipe")),
+                  true,
+                  AutomixRecipeBook::kDefaultSelectorIndex) {
+    m_recipeSelector.setButtonMode(ControlPushButton::TOGGLE);
+    m_recipeSelector.setStates(static_cast<int>(AutomixRecipeBook::selectorIds().size()));
+
     connect(&m_triggerToDeck2,
             &ControlPushButton::valueChanged,
             this,
@@ -69,242 +116,459 @@ AutomixTransitionController::AutomixTransitionController(QObject* pParent)
             &ControlPushButton::valueChanged,
             this,
             &AutomixTransitionController::slotTriggerToDeck1);
+    connect(&m_resume,
+            &ControlPushButton::valueChanged,
+            this,
+            &AutomixTransitionController::slotResume);
 
-    m_timer.setInterval(kTimerIntervalMs);
-    connect(&m_timer, &QTimer::timeout, this, &AutomixTransitionController::slotTick);
+    m_tickTimer.setInterval(kTickIntervalMs);
+    connect(&m_tickTimer, &QTimer::timeout, this, &AutomixTransitionController::slotTick);
+    m_longPressTimer.setSingleShot(true);
+    m_longPressTimer.setInterval(kLongPressMs);
+    connect(&m_longPressTimer,
+            &QTimer::timeout,
+            this,
+            &AutomixTransitionController::slotLongPress);
+    m_refusalTimer.setSingleShot(true);
+    m_refusalTimer.setInterval(kRefusalDisplayMs);
+    connect(&m_refusalTimer,
+            &QTimer::timeout,
+            this,
+            &AutomixTransitionController::slotClearRefusal);
+
+    reloadRecipesIfChanged();
+}
+
+AutomixTransitionController::~AutomixTransitionController() = default;
+
+void AutomixTransitionController::reloadRecipesIfChanged() {
+    QFileInfo info(m_recipeFilePath);
+    if (!info.exists()) {
+        // First run: write the defaults so they can be tuned by ear.
+        QFile file(m_recipeFilePath);
+        if (file.open(QIODevice::WriteOnly)) {
+            file.write(AutomixRecipeBook::builtinJson());
+            file.close();
+            qInfo() << "Automix: wrote default recipes to" << m_recipeFilePath;
+        } else {
+            qWarning() << "Automix: cannot write" << m_recipeFilePath;
+        }
+        m_book = AutomixRecipeBook::builtin();
+        info.refresh();
+        m_recipeFileModified = info.lastModified();
+        m_recipeFileSize = info.size();
+        return;
+    }
+    if (info.lastModified() == m_recipeFileModified && info.size() == m_recipeFileSize) {
+        return;
+    }
+    m_recipeFileModified = info.lastModified();
+    m_recipeFileSize = info.size();
+
+    QFile file(m_recipeFilePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "Automix: cannot read" << m_recipeFilePath << "- keeping previous recipes";
+        return;
+    }
+    AutomixRecipeBook book;
+    QString error;
+    if (!AutomixRecipeBook::parse(file.readAll(), &book, &error)) {
+        qWarning() << "Automix: invalid" << m_recipeFilePath << ":" << error
+                   << "- keeping previous recipes";
+        return;
+    }
+    m_book = std::move(book);
+    qInfo() << "Automix: loaded" << m_book.size() << "recipes from" << m_recipeFilePath;
 }
 
 void AutomixTransitionController::slotTriggerToDeck2(double value) {
-    if (value > 0.0) {
-        startTransition(1);
-    }
+    onTrigger(1, value);
 }
 
 void AutomixTransitionController::slotTriggerToDeck1(double value) {
-    if (value > 0.0) {
-        startTransition(2);
+    onTrigger(2, value);
+}
+
+void AutomixTransitionController::onTrigger(int fromDeckNumber, double value) {
+    if (value <= 0.0) {
+        // Release.
+        m_longPressTimer.stop();
+        m_pressedDeckNumber = 0;
+        return;
+    }
+    m_pressedDeckNumber = fromDeckNumber;
+    switch (m_state) {
+    case State::Idle:
+        arm(fromDeckNumber);
+        if (m_state == State::Armed) {
+            m_longPressTimer.start();
+        }
+        break;
+    case State::Armed:
+        if (fromDeckNumber == m_fromDeckNumber) {
+            disarm();
+        }
+        break;
+    case State::Running:
+        // Ignored: manual takeover of each knob is the way out.
+        break;
     }
 }
 
-void AutomixTransitionController::startTransition(int fromDeckNumber) {
-    if (m_active) {
-        // A transition is already running; ignore re-triggers (including the
-        // opposite direction) rather than guessing what the user wants.
+void AutomixTransitionController::slotLongPress() {
+    if (m_state != State::Armed || m_pressedDeckNumber != m_fromDeckNumber) {
+        return;
+    }
+    // Held: start on the bar right after the press, whatever the quantum.
+    m_startGridBeat = AutomixTransitionMath::nextStartBeat(m_armGridBeat,
+            AutomixTransitionMath::kBeatsPerBar,
+            kStartGraceBeats);
+}
+
+void AutomixTransitionController::arm(int fromDeckNumber) {
+    reloadRecipesIfChanged();
+    const AutomixRecipe* pRecipe =
+            m_book.forSelectorIndex(static_cast<int>(m_recipeSelector.get()));
+    if (!pRecipe) {
+        qWarning() << "Automix: no recipe for selector slot" << m_recipeSelector.get();
         return;
     }
 
-    DeckControls& outgoing = (fromDeckNumber == 1) ? m_deck1 : m_deck2;
-    DeckControls& incoming = (fromDeckNumber == 1) ? m_deck2 : m_deck1;
-
-    const double outgoingBpm = outgoing.bpm.get();
-    const double duration = AutomixTransitionMath::transitionDurationSeconds(outgoingBpm);
-    if (duration <= 0.0) {
-        // No usable BPM on the outgoing deck (no track loaded/analyzed yet).
-        // Refuse to start rather than automate against garbage timing.
+    DeckControls& outgoing = deck(fromDeckNumber);
+    DeckControls& incoming = deck(fromDeckNumber == 1 ? 2 : 1);
+    if (std::abs(m_crossfader.get()) > kCrossfaderCenterTolerance) {
+        refuse(fromDeckNumber, ButtonState::RefusedCrossfader);
+        return;
+    }
+    const TrackPointer pOutgoingTrack = PlayerInfo::instance().getTrackInfo(outgoing.group);
+    const TrackPointer pIncomingTrack = PlayerInfo::instance().getTrackInfo(incoming.group);
+    if (!pOutgoingTrack || !pIncomingTrack) {
+        refuse(fromDeckNumber, ButtonState::RefusedNoTrack);
+        return;
+    }
+    if (!outgoing.play.toBool()) {
+        refuse(fromDeckNumber, ButtonState::RefusedNotPlaying);
+        return;
+    }
+    double gridBeat = 0.0;
+    if (!readGridBeat(outgoing, &gridBeat)) {
+        refuse(fromDeckNumber, ButtonState::RefusedNoGrid);
         return;
     }
 
-    m_active = true;
+    m_recipe = *pRecipe;
     m_fromDeckNumber = fromDeckNumber;
-    m_durationSeconds = duration;
-    m_baselineOutgoingVolume = outgoing.volume.get();
-    m_baselineIncomingVolume = incoming.volume.get();
+    m_pOutgoingTrack = pOutgoingTrack;
+    m_pIncomingTrack = pIncomingTrack;
 
-    // Drop any active loop on BOTH decks before automating anything else
-    // (2026-10-06, Dan's request): a transition shouldn't start with either
-    // deck stuck repeating a loop. Only pulses reloop_toggle when
-    // loop_enabled is actually 1, so a deck with no active loop is left
-    // alone -- this never ACTIVATES a loop, only exits one already running.
-    if (outgoing.loopEnabled.get() > 0.0) {
+    // Dan, 2026-10-06: MIX drops any active loop on both decks. Only pulsed
+    // when a loop is running, so this never starts one.
+    if (outgoing.loopEnabled.toBool()) {
         outgoing.reloopToggle.set(1.0);
     }
-    if (incoming.loopEnabled.get() > 0.0) {
+    if (incoming.loopEnabled.toBool()) {
         incoming.reloopToggle.set(1.0);
     }
 
-    // Tempo matching (REWORKED 2026-10-05, see docs/decisions/0008 "snap to
-    // grid" addendum): a single one-shot rate_ratio write on the incoming
-    // deck, NOT Mixxx's Sync engine. The previous approach (outgoing.
-    // syncLeader.set(2.0) + a deferred incoming.syncEnabled.set(1.0)) got
-    // tempo matching "for free" from Sync, but Sync's tempo lock is
-    // continuous and inseparable from its own continuous beatgrid-phase
-    // correction -- it kept forcibly re-aligning the incoming deck's beat
-    // position to the leader's beatgrid for as long as it stayed enabled,
-    // silently overwriting any manual beatmatching/pitch-bend Dan had
-    // already dialed in on the incoming track before pressing MIX. That is
-    // the bug this rework fixes. Setting rate_ratio only ever changes
-    // playback speed; it never reads or writes beat position, so it is
-    // physically incapable of fighting manual alignment, and -- critically
-    // -- it is applied exactly once, right here, never re-applied on any
-    // later tick, so there is no ongoing lock of any kind for Dan's manual
-    // touch to fight afterward either.
-    const double tempoMatchedRatio = AutomixTransitionMath::tempoMatchedIncomingRateRatio(
-            outgoing.bpm.get(), incoming.bpm.get(), incoming.rateRatio.get());
-    if (tempoMatchedRatio > 0.0) {
-        incoming.rateRatio.set(tempoMatchedRatio);
-    }
-    // else: incoming deck has no usable bpm/rate_ratio reading (e.g. no
-    // track loaded/analyzed) -- skip tempo matching rather than writing a
-    // garbage rate_ratio; the rest of the transition (crossfader/EQ/filter)
-    // still proceeds, same as before this rework.
-
-    // Write the progress-0 state immediately so the transition starts from a
-    // known point and the override baseline below is consistent with what we
-    // just wrote.
-    writeCrossfader(AutomixTransitionMath::crossfaderForProgress(0.0, fromDeckNumber == 1));
-    writeOutgoingBass(AutomixTransitionMath::outgoingBassGainForProgress(0.0));
-    writeIncomingBass(AutomixTransitionMath::incomingBassGainForProgress(0.0));
-    writeOutgoingFilter(AutomixTransitionMath::outgoingFilterForProgress(0.0));
-    writeIncomingFilter(AutomixTransitionMath::incomingFilterForProgress(0.0));
-    if (AutomixTransitionMath::kMidScoopDepth > 0.0) {
-        const double midScoop = AutomixTransitionMath::midScoopGainForProgress(0.0);
-        writeOutgoingMidScoop(midScoop);
-        writeIncomingMidScoop(midScoop);
+    // One-shot tempo match: changes speed only, never phase, never held
+    // (docs/decisions/0008, "snap to grid" addendum).
+    if (m_recipe.tempoMatch) {
+        const double ratio = AutomixTransitionMath::tempoMatchedIncomingRateRatio(
+                outgoing.bpm.get(), incoming.bpm.get(), incoming.rateRatio.get());
+        if (ratio > 0.0) {
+            incoming.rateRatio.set(ratio);
+        }
     }
 
-    m_elapsed.start();
-    m_timer.start();
+    // A stopped incoming deck is silent, so presetting its knobs is
+    // inaudible; it is started on the first bar of the transition.
+    m_incomingNeedsPlay = m_recipe.autoPlayIncoming && !incoming.play.toBool();
+    if (m_incomingNeedsPlay) {
+        for (const AutomixPreset& preset : m_recipe.prepareIncoming) {
+            incoming.control(preset.param)->set(preset.value);
+        }
+    }
+
+    m_armGridBeat = gridBeat;
+    m_startGridBeat = AutomixTransitionMath::nextStartBeat(gridBeat,
+            m_book.armQuantumBars() * AutomixTransitionMath::kBeatsPerBar,
+            kStartGraceBeats);
+    m_state = State::Armed;
+    m_refusalTimer.stop();
+    setButtonState(fromDeckNumber, ButtonState::Armed);
+    setButtonState(fromDeckNumber == 1 ? 2 : 1, ButtonState::Idle);
+    m_engineState.set(1.0);
+    m_countdown.set(std::ceil(m_startGridBeat - gridBeat));
+    qInfo() << "Automix: armed" << m_recipe.id << "from deck" << fromDeckNumber
+            << "grid beat" << gridBeat << "start at" << m_startGridBeat;
+
+    m_tickClock.start();
+    m_tickTimer.start();
+    // A press within the grace window starts right away.
+    slotTick();
+}
+
+void AutomixTransitionController::disarm() {
+    qInfo() << "Automix: disarmed";
+    m_tickTimer.stop();
+    m_longPressTimer.stop();
+    m_state = State::Idle;
+    setButtonState(m_fromDeckNumber, ButtonState::Idle);
+    m_engineState.set(0.0);
+    m_countdown.set(0.0);
+    m_fromDeckNumber = 0;
+    m_pOutgoingTrack.reset();
+    m_pIncomingTrack.reset();
+}
+
+void AutomixTransitionController::start() {
+    m_state = State::Running;
+    m_longPressTimer.stop();
+    setButtonState(m_fromDeckNumber, ButtonState::Running);
+    m_engineState.set(2.0);
+
+    DeckControls& outgoing = outgoingDeck();
+    DeckControls& incoming = incomingDeck();
+    m_lanes.clear();
+    m_lanes.reserve(m_recipe.lanes.size());
+    for (const AutomixLane& lane : m_recipe.lanes) {
+        LaneRuntime runtime;
+        runtime.lane = lane;
+        runtime.pControl = (lane.deck == AutomixDeckRole::Outgoing ? outgoing : incoming)
+                                   .control(lane.param);
+        runtime.startValue = runtime.pControl->get();
+        runtime.lastWritten = runtime.startValue;
+        m_lanes.push_back(std::move(runtime));
+    }
+    qInfo() << "Automix: start" << m_recipe.id << "at transition beat" << m_transitionBeat;
+    writeLanes();
+    if (m_incomingNeedsPlay && m_transitionBeat >= m_recipe.incomingPlayAtBeat) {
+        incoming.play.set(1.0);
+        m_incomingNeedsPlay = false;
+    }
+}
+
+void AutomixTransitionController::writeLanes() {
+    bool anyManual = false;
+    for (LaneRuntime& runtime : m_lanes) {
+        if (!runtime.manual && diverged(runtime.pControl->get(), runtime.lastWritten)) {
+            runtime.manual = true;
+            runtime.gliding = false;
+            qInfo() << "Automix: manual takeover of" << runtime.pControl->getKey().group
+                    << runtime.pControl->getKey().item;
+        }
+        if (runtime.manual) {
+            anyManual = true;
+            continue;
+        }
+        double value = runtime.lane.valueAt(m_transitionBeat, runtime.startValue);
+        if (runtime.gliding) {
+            const double t = runtime.glideBeats > 0.0
+                    ? (m_transitionBeat - runtime.glideStartBeat) / runtime.glideBeats
+                    : 1.0;
+            if (t >= 1.0) {
+                runtime.gliding = false;
+            } else {
+                value = AutomixTransitionMath::interpolate(runtime.glideFrom,
+                        value,
+                        t,
+                        AutomixTransitionMath::Shape::Smoothstep);
+            }
+        }
+        runtime.pControl->set(value);
+        runtime.lastWritten = value;
+    }
+    m_manual.set(anyManual ? 1.0 : 0.0);
+}
+
+void AutomixTransitionController::slotResume(double value) {
+    if (value <= 0.0 || m_state != State::Running) {
+        return;
+    }
+    for (LaneRuntime& runtime : m_lanes) {
+        if (!runtime.manual) {
+            continue;
+        }
+        runtime.manual = false;
+        runtime.gliding = true;
+        runtime.glideFrom = runtime.pControl->get();
+        runtime.glideStartBeat = m_transitionBeat;
+        runtime.glideBeats = m_book.resumeGlideBeats();
+        runtime.lastWritten = runtime.glideFrom;
+    }
+    qInfo() << "Automix: resume auto";
+}
+
+bool AutomixTransitionController::tracksChanged() const {
+    return PlayerInfo::instance().getTrackInfo(m_deck1.group) !=
+            (m_fromDeckNumber == 1 ? m_pOutgoingTrack : m_pIncomingTrack) ||
+            PlayerInfo::instance().getTrackInfo(m_deck2.group) !=
+            (m_fromDeckNumber == 1 ? m_pIncomingTrack : m_pOutgoingTrack);
+}
+
+bool AutomixTransitionController::readGridBeat(DeckControls& deck, double* pBeat) const {
+    const TrackPointer pTrack = PlayerInfo::instance().getTrackInfo(deck.group);
+    if (!pTrack) {
+        return false;
+    }
+    const mixxx::BeatsPointer pBeats = pTrack->getBeats();
+    if (!pBeats) {
+        return false;
+    }
+    if (!deck.pVisualPlayPos || !deck.pVisualPlayPos->isValid()) {
+        return false;
+    }
+    const double trackSamples = deck.trackSamples.get();
+    if (trackSamples <= 0.0) {
+        return false;
+    }
+    // Fraction of the track at the latest engine callback (updated every
+    // buffer, unlike playposition which is throttled to 15 Hz).
+    const double fraction = deck.pVisualPlayPos->getEnginePlayPos();
+    const auto position = mixxx::audio::FramePos::fromEngineSamplePos(fraction * trackSamples);
+
+    auto next = pBeats->iteratorFrom(position); // first beat at or after position
+    if (next == pBeats->cend() || next == pBeats->cbegin()) {
+        return false;
+    }
+    auto prev = next;
+    if (*next > position) {
+        --prev;
+    } else {
+        ++next;
+    }
+    const double beatLength = *next - *prev;
+    if (beatLength <= 0.0) {
+        return false;
+    }
+    const int index = prev - pBeats->cfirstmarker();
+    *pBeat = index + (position - *prev) / beatLength;
+    return true;
 }
 
 void AutomixTransitionController::slotTick() {
-    if (!m_active) {
+    const double dtSeconds = m_tickClock.restart() / 1000.0;
+    if (m_state == State::Idle) {
+        m_tickTimer.stop();
+        return;
+    }
+    if (tracksChanged()) {
+        qInfo() << "Automix: track changed on a deck";
+        if (m_state == State::Armed) {
+            disarm();
+        } else {
+            abort();
+        }
         return;
     }
 
-    if (wasManuallyOverridden()) {
-        cancelTransition("manual touch of crossfader/EQ/volume detected");
+    DeckControls& outgoing = outgoingDeck();
+    double gridBeat = 0.0;
+    const bool haveGrid = readGridBeat(outgoing, &gridBeat);
+    const bool outgoingPlaying = outgoing.play.toBool();
+
+    if (m_state == State::Armed) {
+        if (!haveGrid || !outgoingPlaying) {
+            disarm();
+            return;
+        }
+        if (gridBeat < m_startGridBeat) {
+            m_countdown.set(std::ceil(m_startGridBeat - gridBeat));
+            return;
+        }
+        m_transitionBeat = gridBeat - m_startGridBeat;
+        m_lastGridBeat = gridBeat;
+        start();
         return;
     }
 
-    const double elapsedSeconds = m_elapsed.elapsed() / 1000.0;
-    const double progress = AutomixTransitionMath::progressForElapsed(
-            elapsedSeconds, m_durationSeconds);
-
-    const bool fromDeck1 = (m_fromDeckNumber == 1);
-    writeCrossfader(AutomixTransitionMath::crossfaderForProgress(progress, fromDeck1));
-    writeOutgoingBass(AutomixTransitionMath::outgoingBassGainForProgress(progress));
-    writeIncomingBass(AutomixTransitionMath::incomingBassGainForProgress(progress));
-    writeOutgoingFilter(AutomixTransitionMath::outgoingFilterForProgress(progress));
-    writeIncomingFilter(AutomixTransitionMath::incomingFilterForProgress(progress));
-    if (AutomixTransitionMath::kMidScoopDepth > 0.0) {
-        const double midScoop = AutomixTransitionMath::midScoopGainForProgress(progress);
-        writeOutgoingMidScoop(midScoop);
-        writeIncomingMidScoop(midScoop);
+    // Running.
+    const double rawDelta = haveGrid ? gridBeat - m_lastGridBeat : 0.0;
+    if (haveGrid) {
+        m_lastGridBeat = gridBeat;
+    }
+    const double expectedDelta = dtSeconds * outgoing.bpm.get() / 60.0;
+    const double previousBeat = m_transitionBeat;
+    m_transitionBeat += AutomixTransitionMath::clockAdvance(
+            rawDelta, expectedDelta, outgoingPlaying && haveGrid);
+    // One line per bar: how late the first tick of each bar landed is the
+    // timing error of every phase change (acceptance: < 20 ms).
+    const double bar = std::floor(m_transitionBeat / AutomixTransitionMath::kBeatsPerBar);
+    if (bar > std::floor(previousBeat / AutomixTransitionMath::kBeatsPerBar)) {
+        const double lateMs = (m_transitionBeat - bar * AutomixTransitionMath::kBeatsPerBar) *
+                60000.0 / std::max(outgoing.bpm.get(), 1.0);
+        qInfo() << "Automix: bar" << bar << "tick late by" << lateMs << "ms";
     }
 
-    if (progress >= 1.0) {
-        finishTransition();
+    if (m_incomingNeedsPlay && m_transitionBeat >= m_recipe.incomingPlayAtBeat) {
+        incomingDeck().play.set(1.0);
+        m_incomingNeedsPlay = false;
+    }
+    writeLanes();
+    m_countdown.set(std::ceil(std::max(0.0, m_recipe.lengthBeats - m_transitionBeat) /
+            AutomixTransitionMath::kBeatsPerBar));
+
+    bool anyAutomated = false;
+    bool anyGliding = false;
+    for (const LaneRuntime& runtime : m_lanes) {
+        anyAutomated = anyAutomated || !runtime.manual;
+        anyGliding = anyGliding || runtime.gliding;
+    }
+    if ((m_transitionBeat >= m_recipe.lengthBeats && !anyGliding) || !anyAutomated) {
+        finish();
     }
 }
 
-bool AutomixTransitionController::wasManuallyOverridden() const {
-    DeckControls const& outgoing = (m_fromDeckNumber == 1) ? m_deck1 : m_deck2;
-    DeckControls const& incoming = (m_fromDeckNumber == 1) ? m_deck2 : m_deck1;
-
-    if (diverged(m_crossfader.get(), m_lastWrittenCrossfader)) {
-        return true;
-    }
-    if (diverged(outgoing.eqLowGain.get(), m_lastWrittenOutgoingBass)) {
-        return true;
-    }
-    if (diverged(incoming.eqLowGain.get(), m_lastWrittenIncomingBass)) {
-        return true;
-    }
-    if (diverged(outgoing.filter.get(), m_lastWrittenOutgoingFilter)) {
-        return true;
-    }
-    if (diverged(incoming.filter.get(), m_lastWrittenIncomingFilter)) {
-        return true;
-    }
-    // EXPERIMENTAL mid scoop -- only monitored while actually enabled
-    // (kMidScoopDepth > 0.0); when disabled this class never writes
-    // eqMidGain at all, so a human's own mid setting is simply not our
-    // business.
-    if (AutomixTransitionMath::kMidScoopDepth > 0.0) {
-        if (diverged(outgoing.eqMidGain.get(), m_lastWrittenOutgoingMidScoop)) {
-            return true;
+void AutomixTransitionController::finish() {
+    // Land every automated lane exactly on its final value; manual lanes stay
+    // where Dan put them.
+    for (LaneRuntime& runtime : m_lanes) {
+        if (runtime.manual || diverged(runtime.pControl->get(), runtime.lastWritten)) {
+            continue;
         }
-        if (diverged(incoming.eqMidGain.get(), m_lastWrittenIncomingMidScoop)) {
-            return true;
-        }
+        runtime.pControl->set(runtime.lane.valueAt(m_recipe.lengthBeats, runtime.startValue));
     }
-    // Volume faders are never written by this class, but touching them
-    // during a transition must still cancel it per the safety requirement.
-    if (diverged(outgoing.volume.get(), m_baselineOutgoingVolume)) {
-        return true;
+    if (m_incomingNeedsPlay) {
+        incomingDeck().play.set(1.0);
+        m_incomingNeedsPlay = false;
     }
-    if (diverged(incoming.volume.get(), m_baselineIncomingVolume)) {
-        return true;
-    }
-    return false;
+    qInfo() << "Automix: finished" << m_recipe.id;
+    abort();
 }
 
-void AutomixTransitionController::writeCrossfader(double value) {
-    m_crossfader.set(value);
-    m_lastWrittenCrossfader = value;
-}
-
-void AutomixTransitionController::writeOutgoingBass(double bassValue) {
-    DeckControls& outgoing = (m_fromDeckNumber == 1) ? m_deck1 : m_deck2;
-    outgoing.eqLowGain.set(bassValue);
-    m_lastWrittenOutgoingBass = bassValue;
-}
-
-void AutomixTransitionController::writeIncomingBass(double bassValue) {
-    DeckControls& incoming = (m_fromDeckNumber == 1) ? m_deck2 : m_deck1;
-    incoming.eqLowGain.set(bassValue);
-    m_lastWrittenIncomingBass = bassValue;
-}
-
-void AutomixTransitionController::writeOutgoingFilter(double value) {
-    DeckControls& outgoing = (m_fromDeckNumber == 1) ? m_deck1 : m_deck2;
-    outgoing.filter.set(value);
-    m_lastWrittenOutgoingFilter = value;
-}
-
-void AutomixTransitionController::writeIncomingFilter(double value) {
-    DeckControls& incoming = (m_fromDeckNumber == 1) ? m_deck2 : m_deck1;
-    incoming.filter.set(value);
-    m_lastWrittenIncomingFilter = value;
-}
-
-void AutomixTransitionController::writeOutgoingMidScoop(double value) {
-    DeckControls& outgoing = (m_fromDeckNumber == 1) ? m_deck1 : m_deck2;
-    outgoing.eqMidGain.set(value);
-    m_lastWrittenOutgoingMidScoop = value;
-}
-
-void AutomixTransitionController::writeIncomingMidScoop(double value) {
-    DeckControls& incoming = (m_fromDeckNumber == 1) ? m_deck2 : m_deck1;
-    incoming.eqMidGain.set(value);
-    m_lastWrittenIncomingMidScoop = value;
-}
-
-void AutomixTransitionController::finishTransition() {
-    // No sync state to release anymore (2026-10-05 rework, see the class
-    // comment in the header): tempo matching is a single one-shot
-    // rate_ratio write at transition start, not a continuously-held engine
-    // lock, so there is nothing left engaged on either deck to clean up
-    // here. The incoming deck's rate_ratio simply stays at whatever value
-    // this class (or Dan) last set it to -- exactly like a human pitch-bend
-    // would behave after letting go of the pitch fader.
-    m_timer.stop();
-    m_active = false;
+void AutomixTransitionController::abort() {
+    m_tickTimer.stop();
+    m_longPressTimer.stop();
+    m_lanes.clear();
+    m_state = State::Idle;
+    setButtonState(m_fromDeckNumber, ButtonState::Idle);
+    m_engineState.set(0.0);
+    m_countdown.set(0.0);
+    m_manual.set(0.0);
     m_fromDeckNumber = 0;
+    m_incomingNeedsPlay = false;
+    m_pOutgoingTrack.reset();
+    m_pIncomingTrack.reset();
 }
 
-void AutomixTransitionController::cancelTransition(const char* reason) {
-    Q_UNUSED(reason);
-    // Hand control back immediately: stop touching the crossfader/EQ/filter
-    // at all and leave those exactly where the human just put it -- no
-    // snap-back there, that's the point of "hands it back immediately".
-    // No sync state to release (see finishTransition() above and the
-    // 2026-10-05 header comment) -- the one-shot rate_ratio tempo match
-    // already happened (if at all) before this transition could even reach
-    // slotTick()'s override check, and leaving it applied is correct: it is
-    // indistinguishable from a manual pitch-bend Dan could have done
-    // himself, not an ongoing lock that needs releasing.
-    m_timer.stop();
-    m_active = false;
-    m_fromDeckNumber = 0;
+void AutomixTransitionController::refuse(int fromDeckNumber, ButtonState reason) {
+    qInfo() << "Automix: refused, reason" << static_cast<int>(reason);
+    setButtonState(fromDeckNumber, reason);
+    m_refusalTimer.start();
+}
+
+void AutomixTransitionController::slotClearRefusal() {
+    if (m_state != State::Idle) {
+        return;
+    }
+    setButtonState(1, ButtonState::Idle);
+    setButtonState(2, ButtonState::Idle);
+}
+
+void AutomixTransitionController::setButtonState(int deckNumber, ButtonState state) {
+    if (deckNumber == 1) {
+        m_buttonStateDeck1.set(stateValue(state));
+    } else if (deckNumber == 2) {
+        m_buttonStateDeck2.set(stateValue(state));
+    }
 }

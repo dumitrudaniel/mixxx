@@ -80,6 +80,10 @@
         </Children>
       </WidgetGroup><!-- /Channel controls -->
 
+      <WidgetGroup><Size>1min,3f</Size></WidgetGroup>
+      <Template src="skins:SeratoLike/mixer/automix_controls.xml"/>
+      <WidgetGroup><Size>1min,3f</Size></WidgetGroup>
+
       <WidgetGroup><!-- Crossfader + Channel1/2 assign switches -->
         <ObjectName>CrossfaderAndSwitches2Decks</ObjectName>
         <Layout>horizontal</Layout>

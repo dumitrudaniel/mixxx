@@ -1059,3 +1059,51 @@ WLibrarySidebar {
 #AutomixTransitionButton1:pressed, #AutomixTransitionButton2:pressed {
   background-color: #ffaa33;
 }
+/* Automix Etapa 0: eticheta urmeaza starea motorului ([ChannelN],automix_state).
+   1 armat = galben, 2 mixez = verde, 3..6 refuzat = rosu. */
+#AutomixTransitionButton1[displayValue="1"], #AutomixTransitionButton2[displayValue="1"] {
+  background-color: #ffd400;
+  border: 1px solid #fff066;
+}
+#AutomixTransitionButton1[displayValue="2"], #AutomixTransitionButton2[displayValue="2"] {
+  background-color: #2fbf4f;
+  border: 1px solid #6fe68a;
+}
+#AutomixTransitionButton1[displayValue="3"], #AutomixTransitionButton2[displayValue="3"],
+#AutomixTransitionButton1[displayValue="4"], #AutomixTransitionButton2[displayValue="4"],
+#AutomixTransitionButton1[displayValue="5"], #AutomixTransitionButton2[displayValue="5"],
+#AutomixTransitionButton1[displayValue="6"], #AutomixTransitionButton2[displayValue="6"] {
+  background-color: #e0302a;
+  color: #ffffff;
+  border: 1px solid #ff6b66;
+}
+
+#AutomixRecipeButton {
+  background-color: #2b2b2b;
+  color: #ff8800;
+  font-weight: bold;
+  border: 1px solid #ff8800;
+  border-radius: 2px;
+}
+#AutomixRecipeButton:pressed {
+  background-color: #3a3a3a;
+}
+
+#AutomixCountdown {
+  color: #ffd400;
+  font-weight: bold;
+  font-size: 14px;
+}
+
+#AutomixResumeButton {
+  background-color: #2b2b2b;
+  color: #6a6a6a;
+  border: 1px solid #444444;
+  border-radius: 2px;
+}
+#AutomixResumeButton[displayValue="1"] {
+  background-color: #e0302a;
+  color: #ffffff;
+  font-weight: bold;
+  border: 1px solid #ff6b66;
+}

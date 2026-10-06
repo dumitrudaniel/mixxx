@@ -93,20 +93,16 @@ vertical layout and a side-by-side layout for two-deck mode -->
 
           <WidgetGroup><Size>1min,4f</Size></WidgetGroup>
 
-          <!-- Faza 1.5: starts a 16-bar automated transition from this deck
-               (1) to the other deck (2): crossfader sweep + bass swap at
-               the midpoint + Sync enabled on deck 2. Manually touching the
-               crossfader, EQ knobs or either channel's volume fader during
-               the transition cancels it immediately. See
-               docs/decisions/0008. -->
-          <Template src="skins:SeratoLike/controls/button_1state.xml">
-            <SetVariable name="TooltipId">automix_transition_to_2</SetVariable>
+          <!-- Automix (Etapa 0, docs/decisions/0017): EQ transition from
+               this deck (1) to deck 2 after the selected recipe. Click arms
+               it on the next bar; the label shows the engine state from
+               [Channel1],automix_state (see mixer/automix_mix_button.xml). -->
+          <Template src="skins:SeratoLike/mixer/automix_mix_button.xml">
             <SetVariable name="ObjectName">AutomixTransitionButton1</SetVariable>
-            <SetVariable name="BtnType"></SetVariable>
-            <SetVariable name="ConfigKey">[Channel1],automix_transition_to_2</SetVariable>
-            <SetVariable name="Size">52f,22f</SetVariable>
-            <SetVariable name="state_0_text">MIX &gt;</SetVariable>
-            <SetVariable name="Align">center</SetVariable>
+            <SetVariable name="TooltipId">automix_transition_to_2</SetVariable>
+            <SetVariable name="TriggerKey">[Channel1],automix_transition_to_2</SetVariable>
+            <SetVariable name="StateKey">[Channel1],automix_state</SetVariable>
+            <SetVariable name="IdleText">MIX &gt;</SetVariable>
           </Template>
 
           <WidgetGroup><Size>1min,0me</Size></WidgetGroup>

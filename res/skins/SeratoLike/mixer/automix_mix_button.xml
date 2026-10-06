@@ -1,0 +1,65 @@
+<!--
+Description:
+  Automix MIX button (Etapa 0, docs/decisions/0017). Left click sends the
+  trigger; the label follows the engine state, not the click.
+Variables:
+  ObjectName : AutomixTransitionButton1 / AutomixTransitionButton2 (style.qss)
+  TooltipId  : tooltip key
+  TriggerKey : [ChannelN],automix_transition_to_M
+  StateKey   : [ChannelN],automix_state
+               0 idle, 1 armed, 2 running, 3..6 refused (crossfader not
+               centered, outgoing deck not playing, no beatgrid, no track)
+  IdleText   : label when idle
+-->
+<Template>
+  <PushButton>
+    <TooltipId><Variable name="TooltipId"/></TooltipId>
+    <ObjectName><Variable name="ObjectName"/></ObjectName>
+    <Size>52f,22f</Size>
+    <NumberStates>7</NumberStates>
+    <State>
+      <Number>0</Number>
+      <Text><Variable name="IdleText"/></Text>
+      <Alignment>center</Alignment>
+    </State>
+    <State>
+      <Number>1</Number>
+      <Text>ARMAT</Text>
+      <Alignment>center</Alignment>
+    </State>
+    <State>
+      <Number>2</Number>
+      <Text>MIXEZ</Text>
+      <Alignment>center</Alignment>
+    </State>
+    <State>
+      <Number>3</Number>
+      <Text>XFADER</Text>
+      <Alignment>center</Alignment>
+    </State>
+    <State>
+      <Number>4</Number>
+      <Text>PLAY?</Text>
+      <Alignment>center</Alignment>
+    </State>
+    <State>
+      <Number>5</Number>
+      <Text>GRID?</Text>
+      <Alignment>center</Alignment>
+    </State>
+    <State>
+      <Number>6</Number>
+      <Text>PIESA?</Text>
+      <Alignment>center</Alignment>
+    </State>
+    <Connection>
+      <ConfigKey><Variable name="TriggerKey"/></ConfigKey>
+      <ButtonState>LeftButton</ButtonState>
+      <ConnectValueToWidget>false</ConnectValueToWidget>
+    </Connection>
+    <Connection>
+      <ConfigKey><Variable name="StateKey"/></ConfigKey>
+      <ConnectValueFromWidget>false</ConnectValueFromWidget>
+    </Connection>
+  </PushButton>
+</Template>
