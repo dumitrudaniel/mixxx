@@ -47,7 +47,9 @@ AutomixTransitionController::DeckControls::DeckControls(const QString& group)
           // NOT the 3-band EQ knobs above.
           filter(QStringLiteral("[QuickEffectRack1_") + group + QStringLiteral("]"),
                   QStringLiteral("super1")),
-          rateRatio(group, QStringLiteral("rate_ratio")) {
+          rateRatio(group, QStringLiteral("rate_ratio")),
+          loopEnabled(group, QStringLiteral("loop_enabled")),
+          reloopToggle(group, QStringLiteral("reloop_toggle")) {
 }
 
 AutomixTransitionController::AutomixTransitionController(QObject* pParent)
@@ -107,6 +109,18 @@ void AutomixTransitionController::startTransition(int fromDeckNumber) {
     m_durationSeconds = duration;
     m_baselineOutgoingVolume = outgoing.volume.get();
     m_baselineIncomingVolume = incoming.volume.get();
+
+    // Drop any active loop on BOTH decks before automating anything else
+    // (2026-10-06, Dan's request): a transition shouldn't start with either
+    // deck stuck repeating a loop. Only pulses reloop_toggle when
+    // loop_enabled is actually 1, so a deck with no active loop is left
+    // alone -- this never ACTIVATES a loop, only exits one already running.
+    if (outgoing.loopEnabled.get() > 0.0) {
+        outgoing.reloopToggle.set(1.0);
+    }
+    if (incoming.loopEnabled.get() > 0.0) {
+        incoming.reloopToggle.set(1.0);
+    }
 
     // Tempo matching (REWORKED 2026-10-05, see docs/decisions/0008 "snap to
     // grid" addendum): a single one-shot rate_ratio write on the incoming

@@ -105,6 +105,16 @@ class AutomixTransitionController : public QObject {
         // and the class comment above. Never re-read/re-written afterward;
         // this is deliberately NOT part of the per-tick automation loop.
         ControlProxy rateRatio;
+        // Loop exit, added 2026-10-06 per Dan's request: pressing MIX should
+        // drop any active loop on BOTH decks (not just the one he's looking
+        // at), so a transition never starts with a deck stuck looping.
+        // loop_enabled is a read-only state CO (1 while a loop is active);
+        // reloop_toggle is the push-button that exits it when active (it's
+        // aliased from reloop_exit -- confirmed in
+        // engine/controls/loopingcontrol.cpp). Only pulsed when loop_enabled
+        // is actually 1, so it never ACTIVATES a loop that wasn't running.
+        ControlProxy loopEnabled;
+        ControlProxy reloopToggle;
     };
 
     // fromDeckNumber is 1 or 2; the other deck is the transition target.
