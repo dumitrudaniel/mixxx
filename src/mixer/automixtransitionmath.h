@@ -90,6 +90,15 @@ class AutomixTransitionMath {
     // constantă dacă bass swap-ul sună prea rapid/lent la testare live.
     static constexpr double kBassSwapFraction = 0.6;
 
+    // Crossfader front-load: per Dan's own proposal (2026-10-06) -- "when
+    // the fader is at the midpoint, the incoming track should already be
+    // fully in effect" -- so the crossfader completes its full sweep by
+    // this fraction of progress (the actual midpoint), then holds at the
+    // endpoint, instead of stretching across the whole transition. Mirrors
+    // the bass-swap fraction above in spirit (quick handover, not a slow
+    // whole-duration blend), eased via easeInOut() within that window.
+    static constexpr double kCrossfadeSwapFraction = 0.5;
+
     // Quick-filter ("Filter" knob) sweep range, via the
     // [QuickEffectRack1_[ChannelN]],super1 ControlPotmeter. Confirmed in
     // source (effects/backends/builtin/filtereffect.cpp +
@@ -110,7 +119,13 @@ class AutomixTransitionMath {
     // disable the effect entirely -- the controller skips writing/monitoring
     // the mid-scoop CO altogether when this is 0.0, so disabling it also
     // means it never touches a manually-set mid knob.
-    static constexpr double kMidScoopDepth = 0.2;
+    // Disabled 2026-10-06: Dan tested it live and still felt the "volume
+    // jump" at the midpoint -- even a symmetric, modest -20% mid dip is
+    // apparently still enough to read as a perceptible dip-then-recovery.
+    // Kept at 0.0 (the controller fully skips the CO when this is 0.0) per
+    // the ADR 0008 addendum's own plan for this experiment's negative
+    // outcome, rather than ripping the code out.
+    static constexpr double kMidScoopDepth = 0.0;
 
     // Returns the transition duration in seconds for a 2-bar transition at
     // the given outgoing-deck BPM. Returns -1.0 if bpm is not usable (<= 0),
