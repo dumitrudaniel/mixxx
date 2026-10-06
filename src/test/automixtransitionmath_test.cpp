@@ -37,16 +37,31 @@ TEST_F(AutomixTransitionMathTest, ProgressForElapsed_ZeroDurationIsZero) {
     EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::progressForElapsed(1.0, 0.0));
 }
 
+// Crossfader front-loaded 2026-10-06 (Dan's "fully in effect by the
+// midpoint" proposal): the full -1..+1 sweep now completes by
+// kCrossfadeSwapFraction (0.5) of progress, not progress==1.0, then holds.
+// easeInOut(0.5)==0.5 exactly, so the quarter-progress point (half of the
+// front-loaded window) still lands exactly at the crossfader's own center.
+
 TEST_F(AutomixTransitionMathTest, CrossfaderForProgress_Deck1ToDeck2Sweep) {
     EXPECT_DOUBLE_EQ(-1.0, AutomixTransitionMath::crossfaderForProgress(0.0, true));
-    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::crossfaderForProgress(0.5, true));
+    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::crossfaderForProgress(0.25, true));
+    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::crossfaderForProgress(0.5, true));
     EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::crossfaderForProgress(1.0, true));
 }
 
 TEST_F(AutomixTransitionMathTest, CrossfaderForProgress_Deck2ToDeck1SweepIsReversed) {
     EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::crossfaderForProgress(0.0, false));
-    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::crossfaderForProgress(0.5, false));
+    EXPECT_DOUBLE_EQ(0.0, AutomixTransitionMath::crossfaderForProgress(0.25, false));
+    EXPECT_DOUBLE_EQ(-1.0, AutomixTransitionMath::crossfaderForProgress(0.5, false));
     EXPECT_DOUBLE_EQ(-1.0, AutomixTransitionMath::crossfaderForProgress(1.0, false));
+}
+
+TEST_F(AutomixTransitionMathTest, CrossfaderForProgress_HoldsAtEndpointPastSwapFraction) {
+    // Past the front-loaded window, the crossfader must stay pinned at the
+    // endpoint, not overshoot or reverse.
+    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::crossfaderForProgress(0.7, true));
+    EXPECT_DOUBLE_EQ(1.0, AutomixTransitionMath::crossfaderForProgress(1.0, true));
 }
 
 // --- Mid/high EQ gain fade REMOVED 2026-10-05 (double-attenuation addendum):
