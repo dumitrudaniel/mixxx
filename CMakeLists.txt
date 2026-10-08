@@ -1047,6 +1047,7 @@ add_library(mixxx-lib STATIC EXCLUDE_FROM_ALL
   src/mixer/automixrecipe.cpp
   src/mixer/automixtransitioncontroller.cpp
   src/mixer/automixtransitionmath.cpp
+  src/mixer/gridcorrector.cpp
   src/mixer/auxiliary.cpp
   src/mixer/baseplayer.cpp
   src/mixer/basetrackplayer.cpp
@@ -2132,6 +2133,7 @@ if(BUILD_TESTING)
     src/test/autodjprocessor_test.cpp
     src/test/automixrecipe_test.cpp
     src/test/automixtransitionmath_test.cpp
+    src/test/gridcorrector_test.cpp
     src/test/basetracktablemodel_test.cpp
     src/test/beatgridtest.cpp
     src/test/beatmaptest.cpp

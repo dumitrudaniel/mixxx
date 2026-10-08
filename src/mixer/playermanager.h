@@ -19,6 +19,7 @@ class Auxiliary;
 class BaseTrackPlayer;
 class ControlObject;
 class Deck;
+class GridCorrector;
 class EffectsManager;
 class EngineMixer;
 class Library;
@@ -278,6 +279,9 @@ class PlayerManager : public PlayerManagerInterface {
     // Faza 1.5: constructed once deck 2 exists (see addDeckInner()). Parented
     // to this, so no explicit delete needed.
     AutomixTransitionController* m_pAutomixTransitionController;
+    // DJ App (ADR 0019): corrects off-beat grids from brain.db on track load.
+    // Parented to this.
+    GridCorrector* m_pGridCorrector;
 
     TrackAnalysisScheduler::Pointer m_pTrackAnalysisScheduler;
 
