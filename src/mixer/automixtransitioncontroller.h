@@ -13,6 +13,7 @@
 #include "control/controlpushbutton.h"
 #include "mixer/automixkeyguard.h"
 #include "mixer/automixrecipe.h"
+#include "mixer/automixtempo.h"
 #include "mixer/automixvocalguard.h"
 #include "preferences/usersettings.h"
 #include "track/track_decl.h"
@@ -57,9 +58,17 @@ class VisualPlayPosition;
 //     incoming drums play until half the recipe, then the harmonic stems
 //     swap. On the vocals stem the stricter of the two guards wins.
 //     Switched per transition by [AutomixTransition],key_guard.
+//  7. Tempo (mixer/automixtempo.h, docs/decisions/0027): with the recipe's
+//     tempo mode meet_return, both decks' rate_ratio are lanes too. They
+//     glide together to the midpoint tempo over the first bars, so they stay
+//     phase-locked, and after the transition the incoming deck glides back to
+//     its own tempo (the return outlives the transition: the MIX engine is
+//     idle again and can be re-armed, which ends the return). Touching a
+//     deck's rate fader hands that deck's tempo back to Dan; "Reia auto"
+//     glides it back onto the curve, like any other lane.
 //
 // Never touched: crossfader, channel faders (unless a recipe enables a
-// volume lane), sync. Hardcoded to [Channel1]/[Channel2] because the
+// volume lane), sync (no tempo lanes while a deck has sync on). Hardcoded to [Channel1]/[Channel2] because the
 // SeratoLike skin is 2-deck (docs/decisions/0003).
 class AutomixTransitionController : public QObject {
     Q_OBJECT
@@ -122,7 +131,41 @@ class AutomixTransitionController : public QObject {
         ControlProxy stemOther;
         ControlProxy stemVocals;
         ControlProxy stemCount;
+        // Sync on a deck owns its rate: the tempo lanes stay off then.
+        ControlProxy syncEnabled;
         QSharedPointer<VisualPlayPosition> pVisualPlayPos;
+    };
+
+    // One deck's rate_ratio under automation (meet_return): its rate at the
+    // transition start times the plan's shared factor. Same takeover rules as
+    // LaneRuntime, on its own clock (transition beats, then return beats).
+    struct TempoLane {
+        ControlProxy* pRate = nullptr;
+        double startRate = 1.0;
+        double lastWritten = 1.0;
+        bool manual = false;
+        bool gliding = false;
+        double glideFrom = 0.0;
+        double glideStartBeat = 0.0;
+        double glideBeats = 0.0;
+    };
+
+    // The incoming deck gliding back to its own tempo after the transition.
+    struct TempoReturn {
+        bool active = false;
+        AutomixTempoPlan plan;
+        int incomingDeckNumber = 0;
+        int outgoingDeckNumber = 0;
+        TrackPointer pIncomingTrack;
+        TrackPointer pOutgoingTrack;
+        TempoLane incoming;
+        // Follows with the same factor while it still plays its track.
+        TempoLane outgoing;
+        bool outgoingFollows = false;
+        // Incoming beats since the return started (its own grid).
+        double beat = 0.0;
+        double lastGridBeat = 0.0;
+        bool haveLastGridBeat = false;
     };
 
     struct LaneRuntime {
@@ -171,6 +214,21 @@ class AutomixTransitionController : public QObject {
     // without the guard gain (decks with a new track are left alone, Mixxx
     // resets their stems on load).
     void releaseGuards();
+
+    // Start time: the meet_return schedule from both decks' tempo now. Leaves
+    // m_tempoPlan empty (and logs why) when no tempo lanes run.
+    void planTempo();
+    // Writes `target` to an automated rate lane (detecting a takeover first,
+    // gliding after "Reia auto"). False if the lane is manual.
+    bool writeTempoLane(TempoLane* pLane, double target, double clockBeat);
+    void resumeTempoLane(TempoLane* pLane, double clockBeat);
+    // finish(): hands the incoming tempo over to the return glide.
+    void startTempoReturn();
+    void tickTempoReturn(double dtSeconds);
+    void stopTempoReturn(const QString& reason);
+    // " tempo X BPM, phase in-out Y ms" for the per-bar log line: the live
+    // beatmatch check through the ramps.
+    QString tempoLogNote();
 
     // Outgoing deck position in beats from its grid anchor (Mixxx's first
     // downbeat = beat 0), fractional. False if there is no track, beatgrid
@@ -252,6 +310,11 @@ class AutomixTransitionController : public QObject {
     AutomixVocalGuardPlan m_vocalGuardPlan;
     bool m_keyGuardActive = false;
     AutomixKeyGuardPlan m_keyGuardPlan;
+    // meet_return during the transition (empty = no tempo lanes).
+    std::optional<AutomixTempoPlan> m_tempoPlan;
+    TempoLane m_outgoingTempo;
+    TempoLane m_incomingTempo;
+    TempoReturn m_tempoReturn;
 
     DISALLOW_COPY_AND_ASSIGN(AutomixTransitionController);
 };

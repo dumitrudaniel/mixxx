@@ -141,8 +141,72 @@ TEST_F(AutomixRecipeTest, LanesRampFromTheKnobsCurrentValue) {
 TEST_F(AutomixRecipeTest, FadeCuratSkipsTempoMatchAndStartsIncomingLate) {
     const AutomixRecipe& r = *AutomixRecipeBook::builtin().find(QStringLiteral("fade_curat"));
     EXPECT_FALSE(r.tempoMatch);
+    EXPECT_EQ(AutomixTempoMode::Off, r.tempo.mode);
     EXPECT_DOUBLE_EQ(6.0, r.incomingPlayAtBeat);
     EXPECT_DOUBLE_EQ(8.0, r.lengthBeats);
+}
+
+TEST_F(AutomixRecipeTest, BeatmatchedRecipesMeetInTheMiddleThenReturn) {
+    // Dan's decision #6 (docs/decisions/0027): every beatmatched built-in
+    // recipe meets at the midpoint tempo in 4 bars and returns in 8.
+    for (const QString& id : AutomixRecipeBook::selectorIds()) {
+        const AutomixRecipe& r = *AutomixRecipeBook::builtin().find(id);
+        if (id == QStringLiteral("fade_curat")) {
+            continue;
+        }
+        EXPECT_EQ(AutomixTempoMode::MeetReturn, r.tempo.mode) << id.toStdString();
+        EXPECT_TRUE(r.tempoMatch) << id.toStdString();
+        EXPECT_DOUBLE_EQ(16.0, r.tempo.meetBeats) << id.toStdString();
+        EXPECT_DOUBLE_EQ(32.0, r.tempo.returnBeats) << id.toStdString();
+    }
+}
+
+TEST_F(AutomixRecipeTest, TempoOptionDefaultsAndLegacyTempoMatch) {
+    const auto parseTempo = [](const char* fields, AutomixRecipe* pRecipe) {
+        AutomixRecipeBook book;
+        QString error;
+        const bool ok = AutomixRecipeBook::parse(recipeFile("", fields), &book, &error);
+        EXPECT_TRUE(ok) << fields << " " << error.toStdString();
+        if (ok) {
+            *pRecipe = *book.find(QStringLiteral("t"));
+        }
+    };
+    AutomixRecipe r;
+    // Absent: meet_return with defaults (files written before ADR 0027).
+    parseTempo("", &r);
+    EXPECT_EQ(AutomixTempoMode::MeetReturn, r.tempo.mode);
+    EXPECT_TRUE(r.tempoMatch);
+    EXPECT_DOUBLE_EQ(16.0, r.tempo.meetBeats);
+    EXPECT_DOUBLE_EQ(32.0, r.tempo.returnBeats);
+    // Legacy "tempo_match": false = no tempo change.
+    parseTempo(R"("tempo_match": false,)", &r);
+    EXPECT_EQ(AutomixTempoMode::Off, r.tempo.mode);
+    EXPECT_FALSE(r.tempoMatch);
+    parseTempo(R"("tempo": {"mode": "match_incoming"},)", &r);
+    EXPECT_EQ(AutomixTempoMode::MatchIncoming, r.tempo.mode);
+    EXPECT_TRUE(r.tempoMatch);
+    parseTempo(R"("tempo": {"meet_bars": 2, "return_bars": 0}, "tempo_match": true,)", &r);
+    EXPECT_EQ(AutomixTempoMode::MeetReturn, r.tempo.mode);
+    EXPECT_DOUBLE_EQ(8.0, r.tempo.meetBeats);
+    EXPECT_DOUBLE_EQ(0.0, r.tempo.returnBeats);
+    parseTempo(R"("tempo": {"mode": "off"}, "tempo_match": false,)", &r);
+    EXPECT_EQ(AutomixTempoMode::Off, r.tempo.mode);
+    EXPECT_FALSE(r.tempoMatch);
+}
+
+TEST_F(AutomixRecipeTest, TempoOptionRejectsBrokenValues) {
+    for (const char* bad : {R"("tempo": {"mode": "sync"},)",
+                 R"("tempo": {"meet_bars": 0},)",
+                 R"("tempo": {"return_bars": -1},)",
+                 R"("tempo": "meet_return",)",
+                 R"("tempo": {"mode": "meet_return"}, "tempo_match": false,)",
+                 R"("tempo": {"mode": "off"}, "tempo_match": true,)",
+                 R"("tempo_match": "no",)"}) {
+        AutomixRecipeBook book = AutomixRecipeBook::builtin();
+        QString error;
+        EXPECT_FALSE(AutomixRecipeBook::parse(recipeFile("", bad), &book, &error)) << bad;
+        EXPECT_FALSE(error.isEmpty()) << bad;
+    }
 }
 
 TEST_F(AutomixRecipeTest, ValueAtHoldsOutsideThePoints) {

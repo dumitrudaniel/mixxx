@@ -58,6 +58,30 @@ struct AutomixKeyGuard {
     double fadeBeats = 2.0;
 };
 
+// Live tempo during and after a transition (Dan's decision #6,
+// docs/decisions/0027, planned by mixer/automixtempo.h).
+//  - MeetReturn (default): both decks glide together to the midpoint tempo
+//    (a + b) / 2 over the first meetBeats of the transition (at most half the
+//    recipe), stay there, then the incoming deck glides back to its own tempo
+//    over returnBeats of its beats after the transition (0 = it stays at the
+//    midpoint).
+//  - MatchIncoming: the incoming deck takes the outgoing tempo at arm time and
+//    keeps it (the one-shot match from docs/decisions/0008).
+//  - Off: no tempo change at all (Fade curat).
+// JSON: "tempo": {"mode": "meet_return" | "match_incoming" | "off",
+// "meet_bars": 4, "return_bars": 8}. Legacy "tempo_match": false = mode off.
+enum class AutomixTempoMode {
+    MeetReturn,
+    MatchIncoming,
+    Off,
+};
+
+struct AutomixTempo {
+    AutomixTempoMode mode = AutomixTempoMode::MeetReturn;
+    double meetBeats = 16.0;
+    double returnBeats = 32.0;
+};
+
 struct AutomixPoint {
     double beat = 0.0;
     // "current" in JSON: the value the control held when the transition
@@ -91,8 +115,10 @@ struct AutomixRecipe {
     QString id;
     QString name;
     double lengthBeats = 0.0;
-    // One-shot rate_ratio match of the incoming deck at arm time.
+    // One-shot rate_ratio match of the incoming deck at arm time: on unless
+    // tempo.mode is Off (MeetReturn starts from the matched tempo too).
     bool tempoMatch = true;
+    AutomixTempo tempo;
     // If the incoming deck is stopped when MIX is armed, it is prepared with
     // `prepareIncoming` and started at `incomingPlayAtBeat` (Mixxx aligns its
     // phase on play when quantize is on).

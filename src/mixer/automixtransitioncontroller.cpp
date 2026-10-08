@@ -38,9 +38,23 @@ constexpr double kCrossfaderCenterTolerance = 0.05;
 // A knob whose value differs from what this class last wrote by more than
 // this was touched by a human (any knob/mouse step is far larger).
 constexpr double kOverrideTolerance = 1e-4;
+// rate_ratio: the finest manual step (rate_perm_up_small, 0.05 %) is 5e-4;
+// what this class writes reads back exactly.
+constexpr double kRateOverrideTolerance = 1e-6;
+// "Reia auto" on a rate lane glides over at least one bar: a tempo jump back
+// onto the curve within one beat would be heard as a lurch.
+constexpr double kTempoResumeGlideBeats = 4.0;
 
 bool diverged(double a, double b) {
     return std::abs(a - b) > kOverrideTolerance;
+}
+
+bool rateDiverged(double a, double b) {
+    return std::abs(a - b) > kRateOverrideTolerance;
+}
+
+QString bpmText(double bpm) {
+    return QString::number(bpm, 'f', 2);
 }
 
 double stateValue(AutomixTransitionController::ButtonState state) {
@@ -90,6 +104,7 @@ AutomixTransitionController::DeckControls::DeckControls(const QString& group)
           stemOther(stemGroup(group, 3), QStringLiteral("volume")),
           stemVocals(stemGroup(group, 4), QStringLiteral("volume")),
           stemCount(group, QStringLiteral("stem_count")),
+          syncEnabled(group, QStringLiteral("sync_enabled")),
           // Created by the deck's EngineBuffer, which exists before this
           // controller (PlayerManager builds it after the second deck).
           pVisualPlayPos(VisualPlayPosition::getVisualPlayPosition(group)) {
@@ -303,6 +318,12 @@ void AutomixTransitionController::arm(int fromDeckNumber) {
     if (!readGridBeat(outgoing, &gridBeat)) {
         refuse(fromDeckNumber, ButtonState::RefusedNoGrid);
         return;
+    }
+
+    // A new MIX takes over from a tempo return still running: the decks keep
+    // the tempo they have now and the new transition meets from there.
+    if (m_tempoReturn.active) {
+        stopTempoReturn(QStringLiteral("new MIX armed"));
     }
 
     m_recipe = *pRecipe;
@@ -589,6 +610,15 @@ void AutomixTransitionController::start() {
 
     DeckControls& outgoing = outgoingDeck();
     DeckControls& incoming = incomingDeck();
+    // A stopped incoming deck is inaudible: match it again in case the
+    // outgoing tempo moved while armed, so it starts in phase AND in tempo.
+    if (m_recipe.tempoMatch && m_incomingNeedsPlay) {
+        const double ratio = AutomixTransitionMath::tempoMatchedIncomingRateRatio(
+                outgoing.bpm.get(), incoming.bpm.get(), incoming.rateRatio.get());
+        if (ratio > 0.0 && rateDiverged(ratio, incoming.rateRatio.get())) {
+            incoming.rateRatio.set(ratio);
+        }
+    }
     m_runLengthBeats = m_recipe.lengthBeats;
     const QString guardOffReason = planVocalGuard();
     if (!guardOffReason.isEmpty()) {
@@ -598,6 +628,7 @@ void AutomixTransitionController::start() {
     if (!keyGuardOffReason.isEmpty()) {
         qInfo().noquote() << "Automix: key guard off:" << keyGuardOffReason;
     }
+    planTempo();
 
     m_lanes.clear();
     m_lanes.reserve(m_recipe.lanes.size() + 6);
@@ -677,7 +708,235 @@ void AutomixTransitionController::writeLanes() {
         runtime.pControl->set(value);
         runtime.lastWritten = value;
     }
+    if (m_tempoPlan) {
+        // Same factor on both decks in the same tick: equal tempos, kept phase.
+        const double factor = m_tempoPlan->transitionFactor(m_transitionBeat);
+        for (TempoLane* pLane : {&m_outgoingTempo, &m_incomingTempo}) {
+            writeTempoLane(pLane, pLane->startRate * factor, m_transitionBeat);
+            anyManual = anyManual || pLane->manual;
+        }
+    }
     m_manual.set(anyManual ? 1.0 : 0.0);
+}
+
+void AutomixTransitionController::planTempo() {
+    m_tempoPlan.reset();
+    m_outgoingTempo = TempoLane();
+    m_incomingTempo = TempoLane();
+    DeckControls& outgoing = outgoingDeck();
+    DeckControls& incoming = incomingDeck();
+    if (m_recipe.tempo.mode == AutomixTempoMode::MeetReturn &&
+            (outgoing.syncEnabled.toBool() || incoming.syncEnabled.toBool())) {
+        qInfo() << "Automix: tempo lanes off: sync is on, Mixxx sync owns the rate";
+        return;
+    }
+    QString whyNot;
+    m_tempoPlan = AutomixTempoPlanner::plan(m_recipe.tempo,
+            m_recipe.lengthBeats,
+            outgoing.bpm.get(),
+            incoming.bpm.get(),
+            incoming.rateRatio.get(),
+            &whyNot);
+    if (!m_tempoPlan) {
+        qInfo().noquote() << "Automix: tempo lanes off:" << whyNot;
+        return;
+    }
+    for (auto [pLane, pDeck] : {std::pair{&m_outgoingTempo, &outgoing},
+                 std::pair{&m_incomingTempo, &incoming}}) {
+        pLane->pRate = &pDeck->rateRatio;
+        pLane->startRate = pDeck->rateRatio.get();
+        pLane->lastWritten = pLane->startRate;
+    }
+    const AutomixTempoPlan& plan = *m_tempoPlan;
+    QString returnNote = QStringLiteral(", stays there (return_bars 0)");
+    if (plan.hasReturn()) {
+        returnNote = QStringLiteral(", then incoming back to its own %1 over %2 of its beats")
+                             .arg(bpmText(plan.incomingBpm), QString::number(plan.returnBeats));
+    }
+    qInfo().noquote() << QStringLiteral(
+            "Automix: tempo meet in the middle: %1 and %2 -> %3 BPM, both decks over "
+            "transition beats 0-%4%5")
+                                 .arg(bpmText(plan.outgoingBpm),
+                                         bpmText(plan.incomingBpm),
+                                         bpmText(plan.meetBpm),
+                                         QString::number(plan.meetEndBeat),
+                                         returnNote);
+}
+
+bool AutomixTransitionController::writeTempoLane(
+        TempoLane* pLane, double target, double clockBeat) {
+    if (!pLane->pRate) {
+        return false;
+    }
+    if (!pLane->manual && rateDiverged(pLane->pRate->get(), pLane->lastWritten)) {
+        pLane->manual = true;
+        pLane->gliding = false;
+        qInfo() << "Automix: manual takeover of" << pLane->pRate->getKey().group
+                << pLane->pRate->getKey().item;
+    }
+    if (pLane->manual) {
+        return false;
+    }
+    double value = target;
+    if (pLane->gliding) {
+        const double t = pLane->glideBeats > 0.0
+                ? (clockBeat - pLane->glideStartBeat) / pLane->glideBeats
+                : 1.0;
+        if (t >= 1.0) {
+            pLane->gliding = false;
+        } else {
+            value = AutomixTransitionMath::interpolate(
+                    pLane->glideFrom, target, t, AutomixTransitionMath::Shape::Smoothstep);
+        }
+    }
+    if (value > 0.0) {
+        pLane->pRate->set(value);
+        pLane->lastWritten = value;
+    }
+    return true;
+}
+
+void AutomixTransitionController::resumeTempoLane(TempoLane* pLane, double clockBeat) {
+    if (!pLane->pRate || !pLane->manual) {
+        return;
+    }
+    pLane->manual = false;
+    pLane->gliding = true;
+    pLane->glideFrom = pLane->pRate->get();
+    pLane->glideStartBeat = clockBeat;
+    pLane->glideBeats = std::max(m_book.resumeGlideBeats(), kTempoResumeGlideBeats);
+    pLane->lastWritten = pLane->glideFrom;
+}
+
+void AutomixTransitionController::startTempoReturn() {
+    if (!m_tempoPlan || !m_tempoPlan->hasReturn() || !m_incomingTempo.pRate) {
+        return;
+    }
+    TempoReturn& r = m_tempoReturn;
+    r = TempoReturn();
+    r.plan = *m_tempoPlan;
+    r.incomingDeckNumber = m_fromDeckNumber == 1 ? 2 : 1;
+    r.outgoingDeckNumber = m_fromDeckNumber;
+    r.pIncomingTrack = m_pIncomingTrack;
+    r.pOutgoingTrack = m_pOutgoingTrack;
+    r.incoming = m_incomingTempo;
+    r.outgoing = m_outgoingTempo;
+    r.outgoingFollows = m_outgoingTempo.pRate != nullptr;
+    // A "Reia auto" glide still running restarts on the return's clock.
+    for (TempoLane* pLane : {&r.incoming, &r.outgoing}) {
+        if (pLane->gliding) {
+            pLane->glideFrom = pLane->lastWritten;
+            pLane->glideStartBeat = 0.0;
+        }
+    }
+    DeckControls& incoming = deck(r.incomingDeckNumber);
+    r.haveLastGridBeat = readGridBeat(incoming, &r.lastGridBeat);
+    r.active = true;
+    qInfo().noquote() << QStringLiteral(
+            "Automix: tempo return: incoming %1 -> %2 BPM over %3 of its beats%4")
+                                 .arg(bpmText(r.plan.meetBpm),
+                                         bpmText(r.plan.incomingBpm),
+                                         QString::number(r.plan.returnBeats),
+                                         r.incoming.manual
+                                                 ? QStringLiteral(" (rate under manual control)")
+                                                 : QString());
+}
+
+void AutomixTransitionController::tickTempoReturn(double dtSeconds) {
+    TempoReturn& r = m_tempoReturn;
+    DeckControls& incoming = deck(r.incomingDeckNumber);
+    if (PlayerInfo::instance().getTrackInfo(incoming.group) != r.pIncomingTrack) {
+        stopTempoReturn(QStringLiteral("incoming track changed"));
+        return;
+    }
+    // Clock: the incoming deck's own beats, so the return lasts return_bars
+    // of the music Dan hears, whatever happens to the old deck.
+    double gridBeat = 0.0;
+    const bool haveGrid = readGridBeat(incoming, &gridBeat);
+    const double rawDelta = haveGrid && r.haveLastGridBeat ? gridBeat - r.lastGridBeat : 0.0;
+    if (haveGrid) {
+        r.lastGridBeat = gridBeat;
+        r.haveLastGridBeat = true;
+    }
+    const double expectedDelta = dtSeconds * incoming.bpm.get() / 60.0;
+    const double previousBeat = r.beat;
+    r.beat += AutomixTransitionMath::clockAdvance(
+            rawDelta, expectedDelta, incoming.play.toBool() && haveGrid);
+
+    const double factor = r.plan.returnFactorAt(r.beat);
+    writeTempoLane(&r.incoming, r.incoming.startRate * factor, r.beat);
+    if (r.outgoingFollows) {
+        DeckControls& outgoing = deck(r.outgoingDeckNumber);
+        if (PlayerInfo::instance().getTrackInfo(outgoing.group) != r.pOutgoingTrack ||
+                !outgoing.play.toBool()) {
+            // The old track is gone: its deck is Dan's again.
+            r.outgoingFollows = false;
+        } else {
+            writeTempoLane(&r.outgoing, r.outgoing.startRate * factor, r.beat);
+        }
+    }
+    const bool anyManual = r.incoming.manual || (r.outgoingFollows && r.outgoing.manual);
+    m_manual.set(anyManual ? 1.0 : 0.0);
+
+    const double bar = std::floor(r.beat / AutomixTransitionMath::kBeatsPerBar);
+    if (bar > std::floor(previousBeat / AutomixTransitionMath::kBeatsPerBar)) {
+        qInfo().noquote() << QStringLiteral("Automix: tempo return bar %1: incoming %2 BPM%3")
+                                     .arg(QString::number(bar),
+                                             bpmText(incoming.bpm.get()),
+                                             r.outgoingFollows
+                                                     ? QStringLiteral(" (old deck follows)")
+                                                     : QString());
+    }
+
+    const bool gliding = r.incoming.gliding || (r.outgoingFollows && r.outgoing.gliding);
+    if (r.beat >= r.plan.returnBeats && !gliding) {
+        // Land exactly on the own tempo (rate 1) unless Dan holds the fader.
+        if (!r.incoming.manual && !rateDiverged(r.incoming.pRate->get(), r.incoming.lastWritten)) {
+            r.incoming.pRate->set(r.incoming.startRate * r.plan.returnFactor);
+        }
+        if (r.outgoingFollows && !r.outgoing.manual &&
+                !rateDiverged(r.outgoing.pRate->get(), r.outgoing.lastWritten)) {
+            r.outgoing.pRate->set(r.outgoing.startRate * r.plan.returnFactor);
+        }
+        stopTempoReturn(r.incoming.manual
+                        ? QStringLiteral("done, incoming rate left where Dan put it")
+                        : QStringLiteral("done, incoming back at its own %1 BPM")
+                                  .arg(bpmText(r.plan.incomingBpm)));
+    }
+}
+
+void AutomixTransitionController::stopTempoReturn(const QString& reason) {
+    if (!m_tempoReturn.active) {
+        return;
+    }
+    qInfo().noquote() << "Automix: tempo return ended:" << reason;
+    m_tempoReturn = TempoReturn();
+    if (m_state == State::Idle) {
+        m_manual.set(0.0);
+        m_tickTimer.stop();
+    }
+}
+
+QString AutomixTransitionController::tempoLogNote() {
+    DeckControls& outgoing = outgoingDeck();
+    DeckControls& incoming = incomingDeck();
+    QString note = QStringLiteral(", tempo %1/%2 BPM")
+                           .arg(bpmText(outgoing.bpm.get()), bpmText(incoming.bpm.get()));
+    double outgoingBeat = 0.0;
+    double incomingBeat = 0.0;
+    if (incoming.play.toBool() && readGridBeat(outgoing, &outgoingBeat) &&
+            readGridBeat(incoming, &incomingBeat)) {
+        // Both positions come from the same engine callback: the fractional
+        // beat difference is the beatmatch error.
+        const double diff = incomingBeat - outgoingBeat;
+        const double errorBeats = diff - std::round(diff);
+        note += QStringLiteral(", phase in-out %1 ms")
+                        .arg(QString::number(errorBeats * 60000.0 /
+                                        std::max(outgoing.bpm.get(), 1.0),
+                                'f',
+                                1));
+    }
+    return note;
 }
 
 double AutomixTransitionController::laneTarget(const LaneRuntime& runtime, double beat) const {
@@ -714,9 +973,21 @@ void AutomixTransitionController::releaseGuards() {
 }
 
 void AutomixTransitionController::slotResume(double value) {
-    if (value <= 0.0 || m_state != State::Running) {
+    if (value <= 0.0) {
         return;
     }
+    if (m_tempoReturn.active) {
+        resumeTempoLane(&m_tempoReturn.incoming, m_tempoReturn.beat);
+        if (m_tempoReturn.outgoingFollows) {
+            resumeTempoLane(&m_tempoReturn.outgoing, m_tempoReturn.beat);
+        }
+        qInfo() << "Automix: resume auto (tempo return)";
+    }
+    if (m_state != State::Running) {
+        return;
+    }
+    resumeTempoLane(&m_outgoingTempo, m_transitionBeat);
+    resumeTempoLane(&m_incomingTempo, m_transitionBeat);
     for (LaneRuntime& runtime : m_lanes) {
         if (!runtime.manual) {
             continue;
@@ -768,8 +1039,13 @@ bool AutomixTransitionController::readGridBeat(DeckControls& deck, double* pBeat
 
 void AutomixTransitionController::slotTick() {
     const double dtSeconds = m_tickClock.restart() / 1000.0;
+    if (m_tempoReturn.active) {
+        tickTempoReturn(dtSeconds);
+    }
     if (m_state == State::Idle) {
-        m_tickTimer.stop();
+        if (!m_tempoReturn.active) {
+            m_tickTimer.stop();
+        }
         return;
     }
     if (tracksChanged()) {
@@ -818,7 +1094,8 @@ void AutomixTransitionController::slotTick() {
     if (bar > std::floor(previousBeat / AutomixTransitionMath::kBeatsPerBar)) {
         const double lateMs = (m_transitionBeat - bar * AutomixTransitionMath::kBeatsPerBar) *
                 60000.0 / std::max(outgoing.bpm.get(), 1.0);
-        qInfo() << "Automix: bar" << bar << "tick late by" << lateMs << "ms";
+        qInfo().noquote() << "Automix: bar" << bar << "tick late by" << lateMs << "ms"
+                          << tempoLogNote();
     }
 
     if (m_incomingNeedsPlay && m_transitionBeat >= m_recipe.incomingPlayAtBeat) {
@@ -835,6 +1112,12 @@ void AutomixTransitionController::slotTick() {
         anyAutomated = anyAutomated || !runtime.manual;
         anyGliding = anyGliding || runtime.gliding;
     }
+    if (m_tempoPlan) {
+        for (const TempoLane* pLane : {&m_outgoingTempo, &m_incomingTempo}) {
+            anyAutomated = anyAutomated || !pLane->manual;
+            anyGliding = anyGliding || pLane->gliding;
+        }
+    }
     if ((m_transitionBeat >= m_runLengthBeats && !anyGliding) || !anyAutomated) {
         finish();
     }
@@ -849,23 +1132,41 @@ void AutomixTransitionController::finish() {
         }
         runtime.pControl->set(laneTarget(runtime, m_runLengthBeats));
     }
+    if (m_tempoPlan) {
+        const double factor = m_tempoPlan->transitionFactor(m_runLengthBeats);
+        for (TempoLane* pLane : {&m_outgoingTempo, &m_incomingTempo}) {
+            if (pLane->manual || rateDiverged(pLane->pRate->get(), pLane->lastWritten)) {
+                continue;
+            }
+            pLane->gliding = false;
+            pLane->lastWritten = pLane->startRate * factor;
+            pLane->pRate->set(pLane->lastWritten);
+        }
+    }
     if (m_incomingNeedsPlay) {
         incomingDeck().play.set(1.0);
         m_incomingNeedsPlay = false;
     }
     qInfo() << "Automix: finished" << m_recipe.id;
+    // The incoming deck's glide back to its own tempo outlives the transition.
+    startTempoReturn();
     abort();
 }
 
 void AutomixTransitionController::abort() {
-    m_tickTimer.stop();
+    if (!m_tempoReturn.active) {
+        m_tickTimer.stop();
+    }
     m_longPressTimer.stop();
     m_lanes.clear();
     m_state = State::Idle;
     setButtonState(m_fromDeckNumber, ButtonState::Idle);
     m_engineState.set(0.0);
     m_countdown.set(0.0);
-    m_manual.set(0.0);
+    m_manual.set(m_tempoReturn.active && m_tempoReturn.incoming.manual ? 1.0 : 0.0);
+    m_tempoPlan.reset();
+    m_outgoingTempo = TempoLane();
+    m_incomingTempo = TempoLane();
     m_fromDeckNumber = 0;
     m_incomingNeedsPlay = false;
     m_pOutgoingTrack.reset();

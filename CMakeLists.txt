@@ -1446,6 +1446,7 @@ add_library(
   src/library/treeitemmodel.cpp
   src/mixer/automixkeyguard.cpp
   src/mixer/automixrecipe.cpp
+  src/mixer/automixtempo.cpp
   src/mixer/automixtransitioncontroller.cpp
   src/mixer/automixtransitionmath.cpp
   src/mixer/automixvocalguard.cpp
@@ -2710,6 +2711,7 @@ if(BUILD_TESTING)
     src/test/autodjprocessor_test.cpp
     src/test/automixkeyguard_test.cpp
     src/test/automixrecipe_test.cpp
+    src/test/automixtempo_test.cpp
     src/test/automixtransitionmath_test.cpp
     src/test/automixvocalguard_test.cpp
     src/test/gridcorrector_test.cpp
