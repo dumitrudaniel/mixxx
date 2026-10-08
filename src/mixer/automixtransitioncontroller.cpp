@@ -105,8 +105,11 @@ AutomixTransitionController::AutomixTransitionController(
           m_recipeSelector(ConfigKey(kEngineGroup, QStringLiteral("recipe")),
                   true,
                   AutomixRecipeBook::kDefaultSelectorIndex) {
-    m_recipeSelector.setButtonMode(ControlPushButton::TOGGLE);
-    m_recipeSelector.setStates(static_cast<int>(AutomixRecipeBook::selectorIds().size()));
+    // Mixxx 2.6: ButtonMode moved from ControlPushButton::TOGGLE to the
+    // mixxx::control::ButtonMode enum class; setBehavior() applies both in
+    // one step so the behavior is rebuilt only once.
+    m_recipeSelector.setBehavior(mixxx::control::ButtonMode::Toggle,
+            static_cast<int>(AutomixRecipeBook::selectorIds().size()));
 
     connect(&m_triggerToDeck2,
             &ControlPushButton::valueChanged,
