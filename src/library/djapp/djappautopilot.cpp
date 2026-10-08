@@ -105,11 +105,32 @@ std::optional<double> DJAppAutopilot::readMixOutSec(
     }
     std::optional<double> result;
     QString error;
-    const QString targetKey = BrainDbReader::locationKey(location);
+    QString targetKey = BrainDbReader::locationKey(location);
     BrainDbReader::withReadOnlyConnection(
             dbPath,
             2000,
             [&](const QSqlDatabase& db) {
+                // The deck may be playing a stem twin (.stem.mp4), not the original -
+                // mix_points is keyed by the original's location (ADR 0028). Resolve
+                // it first, same mapping BrainDbReader/DJAppSuggestions already use.
+                // A raw SQL "=" on stem_path would miss it (backslash vs forward-slash,
+                // case), so match normalized keys in C++, like every other lookup here.
+                QSqlQuery resolve(db);
+                if (resolve.exec(QStringLiteral(
+                            "SELECT source_location, stem_path FROM stem_exports"))) {
+                    while (resolve.next()) {
+                        if (BrainDbReader::locationKey(resolve.value(1).toString()) !=
+                                targetKey) {
+                            continue;
+                        }
+                        const QString original = resolve.value(0).toString();
+                        if (!original.isEmpty()) {
+                            targetKey = BrainDbReader::locationKey(original);
+                        }
+                        break;
+                    }
+                }
+
                 QSqlQuery query(db);
                 if (!query.exec(QStringLiteral(
                             "SELECT location, mix_out_sec FROM mix_points"))) {
