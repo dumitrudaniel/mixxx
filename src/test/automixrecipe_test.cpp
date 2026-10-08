@@ -286,6 +286,31 @@ TEST_F(AutomixRecipeTest, VocalGuardDefaultsOnAndCanBeSwitchedOff) {
     }
 }
 
+TEST_F(AutomixRecipeTest, KeyGuardDefaultsOnAndCanBeSwitchedOff) {
+    const AutomixRecipe& standard = *AutomixRecipeBook::builtin().find(QStringLiteral("standard8"));
+    EXPECT_TRUE(standard.keyGuard.enabled);
+    EXPECT_DOUBLE_EQ(2.0, standard.keyGuard.fadeBeats);
+
+    AutomixRecipeBook book;
+    QString error;
+    ASSERT_TRUE(AutomixRecipeBook::parse(
+            recipeFile("", R"("key_guard": {"mode": "off"},)"), &book, &error))
+            << error.toStdString();
+    EXPECT_FALSE(book.find(QStringLiteral("t"))->keyGuard.enabled);
+    ASSERT_TRUE(AutomixRecipeBook::parse(
+            recipeFile("", R"("key_guard": {"fade_beats": 4},)"), &book, &error))
+            << error.toStdString();
+    EXPECT_TRUE(book.find(QStringLiteral("t"))->keyGuard.enabled);
+    EXPECT_DOUBLE_EQ(4.0, book.find(QStringLiteral("t"))->keyGuard.fadeBeats);
+
+    for (const char* bad : {R"("key_guard": {"mode": "maybe"},)",
+                 R"("key_guard": {"fade_beats": -1},)",
+                 R"("key_guard": "on",)"}) {
+        AutomixRecipeBook untouched = AutomixRecipeBook::builtin();
+        EXPECT_FALSE(AutomixRecipeBook::parse(recipeFile("", bad), &untouched, &error)) << bad;
+    }
+}
+
 TEST_F(AutomixRecipeTest, StemValuesAreCappedAtUnity) {
     AutomixRecipeBook book;
     QString error;

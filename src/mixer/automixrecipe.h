@@ -49,6 +49,15 @@ struct AutomixVocalGuard {
     double fadeBeats = 2.0;
 };
 
+// "Doar tobe peste" (Dan, docs/decisions/0022): when the two keys clash, only
+// the incoming drums play until half the recipe; there the harmonic stems
+// (bass, other, vocals) swap in fadeBeats. Needs stem tracks with a key;
+// otherwise the recipe runs on the EQs alone.
+struct AutomixKeyGuard {
+    bool enabled = true;
+    double fadeBeats = 2.0;
+};
+
 struct AutomixPoint {
     double beat = 0.0;
     // "current" in JSON: the value the control held when the transition
@@ -93,6 +102,7 @@ struct AutomixRecipe {
     // Enabled lanes only; lanes with "enabled": false are validated, then dropped.
     std::vector<AutomixLane> lanes;
     AutomixVocalGuard vocalGuard;
+    AutomixKeyGuard keyGuard;
 };
 
 class AutomixRecipeBook {

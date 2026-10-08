@@ -4,11 +4,15 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QtDebug>
+#include <algorithm>
 #include <cmath>
+#include <set>
+#include <utility>
 
 #include "mixer/automixtransitionmath.h"
 #include "mixer/playerinfo.h"
 #include "moc_automixtransitioncontroller.cpp"
+#include "track/keyutils.h"
 #include "track/track.h"
 #include "waveform/visualplayposition.h"
 
@@ -17,7 +21,7 @@ const QString kEngineGroup = QStringLiteral("[AutomixTransition]");
 const QString kRecipeFileName = QStringLiteral("automix_recipes.json");
 // [DJApp],BrainDb in mixxx.cfg: path to brain.db (docs/decisions/0019).
 const QString kDJAppGroup = QStringLiteral("[DJApp]");
-// The vocal guard needs NI stem files: drums, bass, other, vocals.
+// The guards need NI stem files: drums, bass, other, vocals.
 constexpr double kGuardedStemCount = 4.0;
 
 // 50 Hz: a one-beat bass swap at 105 BPM lasts ~0.57 s, i.e. ~28 steps.
@@ -42,6 +46,12 @@ bool diverged(double a, double b) {
 double stateValue(AutomixTransitionController::ButtonState state) {
     return static_cast<double>(static_cast<int>(state));
 }
+// The key guard swaps these; drums are never touched.
+bool isHarmonicStem(AutomixParam param) {
+    return param == AutomixParam::StemBass || param == AutomixParam::StemOther ||
+            param == AutomixParam::StemVocals;
+}
+
 // "[Channel1]" + 4 -> "[Channel1_Stem4]" (Mixxx 2.6 stem groups, file order).
 QString stemGroup(const QString& deckGroup, int stemNumber) {
     return deckGroup.left(deckGroup.size() - 1) + QStringLiteral("_Stem%1]").arg(stemNumber);
@@ -128,6 +138,9 @@ AutomixTransitionController::AutomixTransitionController(
                   AutomixRecipeBook::kDefaultSelectorIndex),
           m_vocalGuardToggle(ConfigKey(kEngineGroup, QStringLiteral("vocal_guard")),
                   true,
+                  1.0),
+          m_keyGuardToggle(ConfigKey(kEngineGroup, QStringLiteral("key_guard")),
+                  true,
                   1.0) {
     // Mixxx 2.6: ButtonMode moved from ControlPushButton::TOGGLE to the
     // mixxx::control::ButtonMode enum class; setBehavior() applies both in
@@ -135,6 +148,7 @@ AutomixTransitionController::AutomixTransitionController(
     m_recipeSelector.setBehavior(mixxx::control::ButtonMode::Toggle,
             static_cast<int>(AutomixRecipeBook::selectorIds().size()));
     m_vocalGuardToggle.setButtonMode(mixxx::control::ButtonMode::Toggle);
+    m_keyGuardToggle.setButtonMode(mixxx::control::ButtonMode::Toggle);
 
     connect(&m_triggerToDeck2,
             &ControlPushButton::valueChanged,
@@ -501,6 +515,47 @@ QString AutomixTransitionController::planVocalGuard() {
     return QString();
 }
 
+QString AutomixTransitionController::planKeyGuard() {
+    m_keyGuardActive = false;
+    if (!m_recipe.keyGuard.enabled) {
+        return QStringLiteral("recipe has key_guard off");
+    }
+    if (!m_keyGuardToggle.toBool()) {
+        return QStringLiteral("switched off on the skin (TON LIBER)");
+    }
+    if (outgoingDeck().stemCount.get() != kGuardedStemCount) {
+        return QStringLiteral("outgoing track is not a stem file (stem_count %1)")
+                .arg(outgoingDeck().stemCount.get());
+    }
+    if (incomingDeck().stemCount.get() != kGuardedStemCount) {
+        return QStringLiteral("incoming track is not a stem file (stem_count %1)")
+                .arg(incomingDeck().stemCount.get());
+    }
+    const mixxx::track::io::key::ChromaticKey outgoingKey = m_pOutgoingTrack->getKey();
+    const mixxx::track::io::key::ChromaticKey incomingKey = m_pIncomingTrack->getKey();
+    if (outgoingKey == mixxx::track::io::key::INVALID) {
+        return QStringLiteral("outgoing track has no key");
+    }
+    if (incomingKey == mixxx::track::io::key::INVALID) {
+        return QStringLiteral("incoming track has no key");
+    }
+    const QString keys = KeyUtils::keyToString(outgoingKey) + QStringLiteral(" -> ") +
+            KeyUtils::keyToString(incomingKey);
+    if (!AutomixKeyGuardPlanner::keysClash(outgoingKey, incomingKey)) {
+        return QStringLiteral("keys fit (") + keys + QStringLiteral(")");
+    }
+    m_keyGuardPlan = AutomixKeyGuardPlanner::plan(
+            m_recipe.lengthBeats, m_recipe.keyGuard.fadeBeats);
+    m_keyGuardActive = true;
+    m_runLengthBeats = std::max(m_runLengthBeats, m_keyGuardPlan.endBeat());
+    qInfo().noquote() << QStringLiteral("Automix: key guard on (%1): only the incoming drums "
+                                        "until beat %2, harmonic stems swap over %3 beats")
+                                 .arg(keys,
+                                         QString::number(m_keyGuardPlan.swapBeat, 'f', 2),
+                                         QString::number(m_keyGuardPlan.fadeBeats, 'f', 2));
+    return QString();
+}
+
 void AutomixTransitionController::start() {
     m_state = State::Running;
     m_longPressTimer.stop();
@@ -514,9 +569,13 @@ void AutomixTransitionController::start() {
     if (!guardOffReason.isEmpty()) {
         qInfo().noquote() << "Automix: vocal guard off:" << guardOffReason;
     }
+    const QString keyGuardOffReason = planKeyGuard();
+    if (!keyGuardOffReason.isEmpty()) {
+        qInfo().noquote() << "Automix: key guard off:" << keyGuardOffReason;
+    }
 
     m_lanes.clear();
-    m_lanes.reserve(m_recipe.lanes.size() + 2);
+    m_lanes.reserve(m_recipe.lanes.size() + 6);
     const auto addLane = [this, &outgoing, &incoming](const AutomixLane& lane) {
         LaneRuntime runtime;
         runtime.lane = lane;
@@ -527,27 +586,31 @@ void AutomixTransitionController::start() {
         runtime.startValue = runtime.pControl->get();
         runtime.lastWritten = runtime.startValue;
         runtime.vocalGuard = m_vocalGuardActive && lane.param == AutomixParam::StemVocals;
+        runtime.keyGuard = m_keyGuardActive && isHarmonicStem(lane.param);
         m_lanes.push_back(std::move(runtime));
     };
-    bool outgoingVocalsLane = false;
-    bool incomingVocalsLane = false;
+    std::set<std::pair<AutomixDeckRole, AutomixParam>> recipeLanes;
     for (const AutomixLane& lane : m_recipe.lanes) {
         addLane(lane);
-        if (lane.param == AutomixParam::StemVocals) {
-            (lane.deck == AutomixDeckRole::Outgoing ? outgoingVocalsLane : incomingVocalsLane) =
-                    true;
-        }
+        recipeLanes.insert({lane.deck, lane.param});
     }
-    if (m_vocalGuardActive) {
-        // Implicit vocals stem lanes: flat at the knob's start value, scaled
-        // by the guard. A recipe stem_vocals lane is scaled instead.
-        for (const AutomixDeckRole role : {AutomixDeckRole::Outgoing, AutomixDeckRole::Incoming}) {
-            if (role == AutomixDeckRole::Outgoing ? outgoingVocalsLane : incomingVocalsLane) {
+    // Implicit stem lanes for the guards: flat at the knob's start value,
+    // scaled by the guard gain. A recipe lane on the same stem is scaled
+    // instead.
+    std::vector<AutomixParam> guardedStems;
+    if (m_keyGuardActive) {
+        guardedStems = {AutomixParam::StemBass, AutomixParam::StemOther, AutomixParam::StemVocals};
+    } else if (m_vocalGuardActive) {
+        guardedStems = {AutomixParam::StemVocals};
+    }
+    for (const AutomixDeckRole role : {AutomixDeckRole::Outgoing, AutomixDeckRole::Incoming}) {
+        for (const AutomixParam param : guardedStems) {
+            if (recipeLanes.count({role, param}) > 0) {
                 continue;
             }
             AutomixLane lane;
             lane.deck = role;
-            lane.param = AutomixParam::StemVocals;
+            lane.param = param;
             addLane(lane);
         }
     }
@@ -593,18 +656,24 @@ void AutomixTransitionController::writeLanes() {
 }
 
 double AutomixTransitionController::laneTarget(const LaneRuntime& runtime, double beat) const {
-    double value = runtime.lane.valueAt(beat, runtime.startValue);
+    const double value = runtime.lane.valueAt(beat, runtime.startValue);
+    const bool outgoingRole = runtime.lane.deck == AutomixDeckRole::Outgoing;
+    double gain = 1.0;
     if (runtime.vocalGuard) {
-        value *= runtime.lane.deck == AutomixDeckRole::Outgoing
-                ? m_vocalGuardPlan.outgoingGain(beat)
-                : m_vocalGuardPlan.incomingGain(beat);
+        gain = outgoingRole ? m_vocalGuardPlan.outgoingGain(beat)
+                            : m_vocalGuardPlan.incomingGain(beat);
     }
-    return value;
+    if (runtime.keyGuard) {
+        gain = std::min(gain,
+                outgoingRole ? m_keyGuardPlan.outgoingGain(beat)
+                             : m_keyGuardPlan.incomingGain(beat));
+    }
+    return value * gain;
 }
 
-void AutomixTransitionController::releaseVocalGuard() {
+void AutomixTransitionController::releaseGuards() {
     for (LaneRuntime& runtime : m_lanes) {
-        if (!runtime.vocalGuard || runtime.manual ||
+        if (!(runtime.vocalGuard || runtime.keyGuard) || runtime.manual ||
                 diverged(runtime.pControl->get(), runtime.lastWritten)) {
             continue;
         }
@@ -682,7 +751,7 @@ void AutomixTransitionController::slotTick() {
         if (m_state == State::Armed) {
             disarm();
         } else {
-            releaseVocalGuard();
+            releaseGuards();
             abort();
         }
         return;
@@ -778,6 +847,7 @@ void AutomixTransitionController::abort() {
     m_outgoingVocalMap.reset();
     m_incomingVocalMap.reset();
     m_vocalGuardActive = false;
+    m_keyGuardActive = false;
 }
 
 void AutomixTransitionController::refuse(int fromDeckNumber, ButtonState reason) {

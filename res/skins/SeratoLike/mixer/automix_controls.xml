@@ -147,6 +147,43 @@ Description:
         </Children>
       </WidgetGroup>
 
+      <WidgetGroup><Size>1min,3f</Size></WidgetGroup>
+
+      <!-- Key guard (src/mixer/automixkeyguard.h): 1 = with clashing keys
+           only the new drums come in until half the transition, then the
+           bass, instruments and voice swap; 0 = plain EQ blend. Persisted;
+           read when a transition starts. -->
+      <WidgetGroup>
+        <Layout>horizontal</Layout>
+        <SizePolicy>min,min</SizePolicy>
+        <Children>
+          <WidgetGroup><Size>0me,0min</Size></WidgetGroup>
+
+          <PushButton>
+            <TooltipId>automix_key_guard</TooltipId>
+            <ObjectName>AutomixKeyGuardButton</ObjectName>
+            <Size>84f,20f</Size>
+            <NumberStates>2</NumberStates>
+            <State>
+              <Number>0</Number>
+              <Text>TON LIBER</Text>
+              <Alignment>center</Alignment>
+            </State>
+            <State>
+              <Number>1</Number>
+              <Text>GARDA TON</Text>
+              <Alignment>center</Alignment>
+            </State>
+            <Connection>
+              <ConfigKey>[AutomixTransition],key_guard</ConfigKey>
+              <ButtonState>LeftButton</ButtonState>
+            </Connection>
+          </PushButton>
+
+          <WidgetGroup><Size>0me,0min</Size></WidgetGroup>
+        </Children>
+      </WidgetGroup>
+
     </Children>
   </WidgetGroup>
 </Template>

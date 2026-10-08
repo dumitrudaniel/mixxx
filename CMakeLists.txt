@@ -1444,6 +1444,7 @@ add_library(
   src/library/traktor/traktorfeature.cpp
   src/library/treeitem.cpp
   src/library/treeitemmodel.cpp
+  src/mixer/automixkeyguard.cpp
   src/mixer/automixrecipe.cpp
   src/mixer/automixtransitioncontroller.cpp
   src/mixer/automixtransitionmath.cpp
@@ -2707,6 +2708,7 @@ if(BUILD_TESTING)
     src/test/analyzersilence_test.cpp
     src/test/audiotaperpot_test.cpp
     src/test/autodjprocessor_test.cpp
+    src/test/automixkeyguard_test.cpp
     src/test/automixrecipe_test.cpp
     src/test/automixtransitionmath_test.cpp
     src/test/automixvocalguard_test.cpp

@@ -659,6 +659,16 @@ void Tooltips::addStandardTooltips() {
                   "instrumentale nu sunt atinse. Se citeste la pornirea "
                   "tranzitiei. Atingi knob-ul VOCE = il preiei manual.");
 
+    add("automix_key_guard")
+            << tr("Garda tonalitate")
+            << tr("GARDA TON (aprins): daca tonalitatile celor doua piese nu se "
+                  "potrivesc pe roata Camelot, din piesa noua intra intai doar "
+                  "tobele; la jumatatea tranzitiei basul, instrumentele si vocea "
+                  "trec dintr-o piesa in cealalta. TON LIBER (stins): tranzitie "
+                  "doar din EQ. Merge doar pe piese cu stems si cu tonalitate "
+                  "analizata. Se citeste la pornirea tranzitiei. Atingi un "
+                  "knob de stem = il preiei manual.");
+
     add("mute")
             << tr("Mute")
             << tr("Mutes the selected channel's audio in the main output.");

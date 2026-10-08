@@ -232,6 +232,37 @@ bool parseVocalGuard(const QJsonValue& json, AutomixVocalGuard* pGuard, QString*
     return true;
 }
 
+// "key_guard": absent = on with defaults (Dan's choice for clashing keys);
+// {"mode": "off"} switches it off. Mirrors brain/automix/recipes.py.
+bool parseKeyGuard(const QJsonValue& json, AutomixKeyGuard* pGuard, QString* pError) {
+    *pGuard = AutomixKeyGuard();
+    if (json.isUndefined() || json.isNull()) {
+        return true;
+    }
+    if (!json.isObject()) {
+        *pError = QStringLiteral("key_guard must be an object");
+        return false;
+    }
+    const QJsonObject object = json.toObject();
+    const QString mode = object.value(QStringLiteral("mode")).toString(
+            QStringLiteral("drums_first"));
+    if (mode == QLatin1String("off")) {
+        pGuard->enabled = false;
+        return true;
+    }
+    if (mode != QLatin1String("drums_first")) {
+        *pError = QStringLiteral("key_guard: unknown mode \"%1\"").arg(mode);
+        return false;
+    }
+    const double fadeBeats = object.value(QStringLiteral("fade_beats")).toDouble(2.0);
+    if (fadeBeats < 0.0) {
+        *pError = QStringLiteral("key_guard: fade_beats must be >= 0");
+        return false;
+    }
+    pGuard->fadeBeats = fadeBeats;
+    return true;
+}
+
 bool parseShape(const QString& text, Shape* pShape) {
     if (text == QLatin1String("linear")) {
         *pShape = Shape::Linear;
@@ -433,6 +464,9 @@ bool parseRecipe(const QJsonObject& json, AutomixRecipe* pRecipe, QString* pErro
     if (!parseVocalGuard(json.value(QStringLiteral("vocal_guard")),
                 &pRecipe->vocalGuard,
                 pError)) {
+        return false;
+    }
+    if (!parseKeyGuard(json.value(QStringLiteral("key_guard")), &pRecipe->keyGuard, pError)) {
         return false;
     }
 

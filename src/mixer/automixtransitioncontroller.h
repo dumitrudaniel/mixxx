@@ -11,6 +11,7 @@
 #include "control/controlobject.h"
 #include "control/controlproxy.h"
 #include "control/controlpushbutton.h"
+#include "mixer/automixkeyguard.h"
 #include "mixer/automixrecipe.h"
 #include "mixer/automixvocalguard.h"
 #include "preferences/usersettings.h"
@@ -51,6 +52,11 @@ class VisualPlayPosition;
 //     each deck is an extra lane (multiplying the recipe's stem_vocals lane,
 //     if any): the old voice finishes its phrase, then the new one comes in.
 //     Switched per transition by [AutomixTransition],vocal_guard.
+//  6. Key guard (mixer/automixkeyguard.h): with two stem tracks whose keys
+//     clash, the bass, other and vocals stems are extra lanes too: only the
+//     incoming drums play until half the recipe, then the harmonic stems
+//     swap. On the vocals stem the stricter of the two guards wins.
+//     Switched per transition by [AutomixTransition],key_guard.
 //
 // Never touched: crossfader, channel faders (unless a recipe enables a
 // volume lane), sync. Hardcoded to [Channel1]/[Channel2] because the
@@ -131,6 +137,8 @@ class AutomixTransitionController : public QObject {
         double glideBeats = 0.0;
         // Vocals stem lane scaled by the vocal guard gain of lane.deck.
         bool vocalGuard = false;
+        // Bass/other/vocals stem lane scaled by the key guard gain of lane.deck.
+        bool keyGuard = false;
     };
 
     void onTrigger(int fromDeckNumber, double value);
@@ -144,7 +152,7 @@ class AutomixTransitionController : public QObject {
     void reloadRecipesIfChanged();
     void writeLanes();
     bool tracksChanged() const;
-    // Lane value at `beat`, vocal guard gain included.
+    // Lane value at `beat`, guard gains included (the smaller one if both).
     double laneTarget(const LaneRuntime& runtime, double beat) const;
 
     // Arm time: vocal maps of both tracks from brain.db (read-only).
@@ -152,11 +160,14 @@ class AutomixTransitionController : public QObject {
     // Start time: decides whether the guard runs and plans it. Returns why it
     // is off (empty = on).
     QString planVocalGuard();
-    // A transition cancelled by a track change must not leave a voice muted
+    // Start time: decides whether the key guard runs (stems on both decks,
+    // both keys known and clashing) and plans it. Returns why it is off.
+    QString planKeyGuard();
+    // A transition cancelled by a track change must not leave a stem muted
     // on a deck that keeps playing: guard lanes go back to their curve value
     // without the guard gain (decks with a new track are left alone, Mixxx
     // resets their stems on load).
-    void releaseVocalGuard();
+    void releaseGuards();
 
     // Outgoing deck position in beats from its grid anchor (Mixxx's first
     // downbeat = beat 0), fractional. False if there is no track, beatgrid
@@ -205,6 +216,9 @@ class AutomixTransitionController : public QObject {
     // 0 = voices may overlap ("VOCE LIBERA"). Persisted, read when a
     // transition starts.
     ControlPushButton m_vocalGuardToggle;
+    // [AutomixTransition],key_guard: 1 = "GARDA TON" (default), 0 = "TON
+    // LIBER" (EQ blend even when the keys clash). Persisted.
+    ControlPushButton m_keyGuardToggle;
 
     QTimer m_tickTimer;
     QTimer m_longPressTimer;
@@ -221,8 +235,8 @@ class AutomixTransitionController : public QObject {
     double m_startGridBeat = 0.0;
     double m_lastGridBeat = 0.0;
     double m_transitionBeat = 0.0;
-    // Recipe length, stretched if the vocal guard needs longer (only a
-    // recipe shorter than four guard fades).
+    // Recipe length, stretched if a guard needs longer (only a recipe
+    // shorter than four guard fades).
     double m_runLengthBeats = 0.0;
     bool m_incomingNeedsPlay = false;
     TrackPointer m_pOutgoingTrack;
@@ -233,6 +247,8 @@ class AutomixTransitionController : public QObject {
     std::optional<AutomixVocalMap> m_incomingVocalMap;
     bool m_vocalGuardActive = false;
     AutomixVocalGuardPlan m_vocalGuardPlan;
+    bool m_keyGuardActive = false;
+    AutomixKeyGuardPlan m_keyGuardPlan;
 
     DISALLOW_COPY_AND_ASSIGN(AutomixTransitionController);
 };

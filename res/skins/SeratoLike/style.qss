@@ -1109,19 +1109,20 @@ WLibrarySidebar {
 }
 
 /* Garda de voce: 1 = GARDA VOCE (aprins, ca selectorul de reteta),
-   0 = VOCE LIBERA (stins, vocile se pot suprapune). */
-#AutomixVocalGuardButton {
+   0 = VOCE LIBERA (stins, vocile se pot suprapune).
+   Garda de tonalitate (ADR 0022), la fel: 1 = GARDA TON, 0 = TON LIBER. */
+#AutomixVocalGuardButton, #AutomixKeyGuardButton {
   background-color: #2b2b2b;
   color: #6a6a6a;
   border: 1px solid #444444;
   border-radius: 2px;
 }
-#AutomixVocalGuardButton[displayValue="1"] {
+#AutomixVocalGuardButton[displayValue="1"], #AutomixKeyGuardButton[displayValue="1"] {
   color: #ff8800;
   font-weight: bold;
   border: 1px solid #ff8800;
 }
-#AutomixVocalGuardButton:pressed {
+#AutomixVocalGuardButton:pressed, #AutomixKeyGuardButton:pressed {
   background-color: #3a3a3a;
 }
 
