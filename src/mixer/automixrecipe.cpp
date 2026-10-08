@@ -19,7 +19,7 @@ using Shape = AutomixTransitionMath::Shape;
 // ~16 KB.
 constexpr const char* kBuiltinJsonHead = R"JSON({
   "version": 1,
-  "notes": "Retete automix DJ App. EQ: castig liniar, 1 = unitate, 0 = kill, \"-12dB\" = 0.25. Filtru: 0.5 neutru, spre 1 HPF, spre 0 LPF. Volum: 1 = fader la maxim. Punct: bar (sau beat), value (numar, current, kill, unity, neutral sau \"-6dB\"), shape = forma segmentului care se termina in punct (linear, sin, cos, smoothstep, hold). current = valoarea knob-ului la pornirea tranzitiei. Fisierul se reciteste la fiecare apasare MIX; sterge-l ca sa revii la valorile implicite.",
+  "notes": "Retete automix DJ App. EQ: castig liniar, 1 = unitate, 0 = kill, \"-12dB\" = 0.25. Filtru: 0.5 neutru, spre 1 HPF, spre 0 LPF. Volum: 1 = fader la maxim. Punct: bar (sau beat), value (numar, current, kill, unity, neutral sau \"-6dB\"), shape = forma segmentului care se termina in punct (linear, sin, cos, smoothstep, hold). current = valoarea knob-ului la pornirea tranzitiei. Tempo: meet_return = ambele piese se intalnesc la tempo-ul de mijloc (a+b)/2 in primele meet_bars ale tranzitiei (cel mult jumatate din ea), apoi piesa noua revine la tempo-ul ei in return_bars; match_incoming = doar piesa noua ia tempo-ul celei vechi si ramane acolo; off = fara potrivire. Fisierul se reciteste la fiecare apasare MIX; sterge-l ca sa revii la valorile implicite.",
   "settings": {
     "arm_quantum_bars": 1,
     "resume_glide_beats": 1
@@ -32,6 +32,7 @@ constexpr const char* kBuiltinJsonUrgenta2 = R"JSON(    {
       "name": "Urgenta 2",
       "notes": "2 bare: aceeasi reteta ca Standard 8, comprimata. Salvare rapida. Piesa veche iese complet pana la timpul 5.5 (11/16 din reteta).",
       "length_bars": 2,
+      "tempo": { "mode": "meet_return", "meet_bars": 4, "return_bars": 8 },
       "prepare_incoming": { "eq_low": "kill", "eq_mid": "kill", "eq_high": "kill" },
       "lanes": [
         { "deck": "incoming", "param": "eq_mid", "points": [
@@ -60,6 +61,7 @@ constexpr const char* kBuiltinJsonScurt4 = R"JSON(    {
       "name": "Scurt 4",
       "notes": "4 bare: grila nesigura, semba/kompa live, mod scoala. Piesa veche iese complet pana la bara 2.75 (timpul 11, 11/16 din reteta).",
       "length_bars": 4,
+      "tempo": { "mode": "meet_return", "meet_bars": 4, "return_bars": 8 },
       "prepare_incoming": { "eq_low": "kill", "eq_mid": "kill", "eq_high": "kill" },
       "lanes": [
         { "deck": "incoming", "param": "eq_mid", "points": [
@@ -88,6 +90,7 @@ constexpr const char* kBuiltinJsonStandard8 = R"JSON(    {
       "name": "Standard 8",
       "notes": "Implicit. Faza 1 (bare 0-4): mediile piesei noi urca, basul ei ramane taiat, inaltele ei doar pana la -12 dB. Faza 2 (downbeat bara 4): bas schimbat in 1 timp, inalte in 1 bara, equal-power. Faza 3 (bare 4-5.5): mediile piesei vechi coboara la kill (smoothstep); din timpul 22 (ultima treime) se aude doar piesa noua (Dan, 2026-10-08). Filtrul si intrarea mai usoara in volum sunt oprite (enabled false); pune true ca sa le incerci.",
       "length_bars": 8,
+      "tempo": { "mode": "meet_return", "meet_bars": 4, "return_bars": 8 },
       "prepare_incoming": { "eq_low": "kill", "eq_mid": "kill", "eq_high": "kill" },
       "lanes": [
         { "deck": "incoming", "param": "eq_mid", "points": [
@@ -121,6 +124,7 @@ constexpr const char* kBuiltinJsonLung16 = R"JSON(    {
       "name": "Lung 16",
       "notes": "16 bare: urban kiz, tarraxo, intro/outro lungi. Basul se schimba in 2 timpi. Piesa veche iese complet pana la bara 11 (timpul 44, 11/16 din reteta).",
       "length_bars": 16,
+      "tempo": { "mode": "meet_return", "meet_bars": 4, "return_bars": 8 },
       "prepare_incoming": { "eq_low": "kill", "eq_mid": "kill", "eq_high": "kill" },
       "lanes": [
         { "deck": "incoming", "param": "eq_mid", "points": [
@@ -149,7 +153,7 @@ constexpr const char* kBuiltinJsonFadeCurat = R"JSON(    {
       "name": "Fade curat",
       "notes": "Fara beatmatch: tempo peste buget sau piese incompatibile. Piesa veche se stinge in 2 bare; piesa noua porneste la bara 1.5. Regula 11/16 nu se aplica: suprapunerea e doar ultima jumatate de bara, scoaterea mai devreme ar lasa liniste.",
       "length_bars": 2,
-      "tempo_match": false,
+      "tempo": { "mode": "off" },
       "incoming_play_at_bar": 1.5,
       "prepare_incoming": { "eq_low": "unity", "eq_mid": "unity", "eq_high": "unity" },
       "lanes": [
@@ -188,6 +192,59 @@ bool parseParam(const QString& text, AutomixParam* pParam) {
     } else {
         return false;
     }
+    return true;
+}
+
+// "tempo": absent = meet_return with defaults (Dan's decision #6), unless the
+// legacy "tempo_match": false asks for no tempo change. Both present must agree.
+// Same rules as the 2.6 fork and brain/automix/recipes.py; the 2.5 engine only
+// reads tempoMatch (one-shot match unless mode off).
+bool parseTempo(const QJsonValue& json,
+        const QJsonValue& legacyTempoMatch,
+        AutomixTempo* pTempo,
+        QString* pError) {
+    *pTempo = AutomixTempo();
+    if (!legacyTempoMatch.isUndefined() && !legacyTempoMatch.isBool()) {
+        *pError = QStringLiteral("tempo_match must be true or false");
+        return false;
+    }
+    const bool legacyOff = legacyTempoMatch.isBool() && !legacyTempoMatch.toBool();
+    if (json.isUndefined() || json.isNull()) {
+        if (legacyOff) {
+            pTempo->mode = AutomixTempoMode::Off;
+        }
+        return true;
+    }
+    if (!json.isObject()) {
+        *pError = QStringLiteral("tempo must be an object");
+        return false;
+    }
+    const QJsonObject object = json.toObject();
+    const QString mode = object.value(QStringLiteral("mode")).toString(
+            QStringLiteral("meet_return"));
+    if (mode == QLatin1String("meet_return")) {
+        pTempo->mode = AutomixTempoMode::MeetReturn;
+    } else if (mode == QLatin1String("match_incoming")) {
+        pTempo->mode = AutomixTempoMode::MatchIncoming;
+    } else if (mode == QLatin1String("off")) {
+        pTempo->mode = AutomixTempoMode::Off;
+    } else {
+        *pError = QStringLiteral("tempo: unknown mode \"%1\"").arg(mode);
+        return false;
+    }
+    if (legacyTempoMatch.isBool() &&
+            legacyTempoMatch.toBool() == (pTempo->mode == AutomixTempoMode::Off)) {
+        *pError = QStringLiteral("tempo_match contradicts tempo.mode \"%1\"").arg(mode);
+        return false;
+    }
+    const double meetBars = object.value(QStringLiteral("meet_bars")).toDouble(4.0);
+    const double returnBars = object.value(QStringLiteral("return_bars")).toDouble(8.0);
+    if (meetBars <= 0.0 || returnBars < 0.0) {
+        *pError = QStringLiteral("tempo: meet_bars must be > 0 and return_bars >= 0");
+        return false;
+    }
+    pTempo->meetBeats = meetBars * AutomixTransitionMath::kBeatsPerBar;
+    pTempo->returnBeats = returnBars * AutomixTransitionMath::kBeatsPerBar;
     return true;
 }
 
@@ -359,7 +416,13 @@ bool parseRecipe(const QJsonObject& json, AutomixRecipe* pRecipe, QString* pErro
         return false;
     }
     pRecipe->lengthBeats = lengthBars * AutomixTransitionMath::kBeatsPerBar;
-    pRecipe->tempoMatch = json.value(QStringLiteral("tempo_match")).toBool(true);
+    if (!parseTempo(json.value(QStringLiteral("tempo")),
+                json.value(QStringLiteral("tempo_match")),
+                &pRecipe->tempo,
+                pError)) {
+        return false;
+    }
+    pRecipe->tempoMatch = pRecipe->tempo.mode != AutomixTempoMode::Off;
     pRecipe->autoPlayIncoming = json.value(QStringLiteral("auto_play_incoming")).toBool(true);
     pRecipe->incomingPlayAtBeat =
             json.value(QStringLiteral("incoming_play_at_bar")).toDouble(0.0) *

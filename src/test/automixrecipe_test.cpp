@@ -141,8 +141,41 @@ TEST_F(AutomixRecipeTest, LanesRampFromTheKnobsCurrentValue) {
 TEST_F(AutomixRecipeTest, FadeCuratSkipsTempoMatchAndStartsIncomingLate) {
     const AutomixRecipe& r = *AutomixRecipeBook::builtin().find(QStringLiteral("fade_curat"));
     EXPECT_FALSE(r.tempoMatch);
+    EXPECT_EQ(AutomixTempoMode::Off, r.tempo.mode);
     EXPECT_DOUBLE_EQ(6.0, r.incomingPlayAtBeat);
     EXPECT_DOUBLE_EQ(8.0, r.lengthBeats);
+}
+
+TEST_F(AutomixRecipeTest, TempoOptionParsesLikeThe26Fork) {
+    // docs/decisions/0027: the same file means the same thing in both forks;
+    // Mixxx 2.5 runs meet_return as the one-shot match.
+    const AutomixRecipe& standard = *AutomixRecipeBook::builtin().find(QStringLiteral("standard8"));
+    EXPECT_EQ(AutomixTempoMode::MeetReturn, standard.tempo.mode);
+    EXPECT_TRUE(standard.tempoMatch);
+    EXPECT_DOUBLE_EQ(16.0, standard.tempo.meetBeats);
+    EXPECT_DOUBLE_EQ(32.0, standard.tempo.returnBeats);
+
+    AutomixRecipeBook book;
+    QString error;
+    ASSERT_TRUE(AutomixRecipeBook::parse(recipeFile("", R"("tempo_match": false,)"), &book, &error))
+            << error.toStdString();
+    EXPECT_EQ(AutomixTempoMode::Off, book.find(QStringLiteral("t"))->tempo.mode);
+    EXPECT_FALSE(book.find(QStringLiteral("t"))->tempoMatch);
+    ASSERT_TRUE(AutomixRecipeBook::parse(
+            recipeFile("", R"("tempo": {"mode": "match_incoming"},)"), &book, &error))
+            << error.toStdString();
+    EXPECT_EQ(AutomixTempoMode::MatchIncoming, book.find(QStringLiteral("t"))->tempo.mode);
+    EXPECT_TRUE(book.find(QStringLiteral("t"))->tempoMatch);
+
+    for (const char* bad : {R"("tempo": {"mode": "sync"},)",
+                 R"("tempo": {"meet_bars": 0},)",
+                 R"("tempo": {"return_bars": -1},)",
+                 R"("tempo": "meet_return",)",
+                 R"("tempo": {"mode": "meet_return"}, "tempo_match": false,)",
+                 R"("tempo_match": "no",)"}) {
+        AutomixRecipeBook untouched = AutomixRecipeBook::builtin();
+        EXPECT_FALSE(AutomixRecipeBook::parse(recipeFile("", bad), &untouched, &error)) << bad;
+    }
 }
 
 TEST_F(AutomixRecipeTest, ValueAtHoldsOutsideThePoints) {

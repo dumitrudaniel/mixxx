@@ -61,12 +61,30 @@ struct AutomixPreset {
     double value = 0.0;
 };
 
+// "tempo" in the recipe file, parsed like the 2.6 fork and brain so the same
+// file means the same thing everywhere (docs/decisions/0027). Mixxx 2.5 only
+// does the one-shot match: meet_return runs here as match_incoming; off skips
+// the match (Fade curat). Legacy "tempo_match": false = mode off.
+enum class AutomixTempoMode {
+    MeetReturn,
+    MatchIncoming,
+    Off,
+};
+
+struct AutomixTempo {
+    AutomixTempoMode mode = AutomixTempoMode::MeetReturn;
+    double meetBeats = 16.0;
+    double returnBeats = 32.0;
+};
+
 struct AutomixRecipe {
     QString id;
     QString name;
     double lengthBeats = 0.0;
-    // One-shot rate_ratio match of the incoming deck at arm time.
+    // One-shot rate_ratio match of the incoming deck at arm time: on unless
+    // tempo.mode is Off.
     bool tempoMatch = true;
+    AutomixTempo tempo;
     // If the incoming deck is stopped when MIX is armed, it is prepared with
     // `prepareIncoming` and started at `incomingPlayAtBeat` (Mixxx aligns its
     // phase on play when quantize is on).
