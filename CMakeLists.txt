@@ -1486,6 +1486,9 @@ add_library(
   src/musicbrainz/web/coverartarchivelinkstask.cpp
   src/musicbrainz/web/musicbrainzrecordingstask.cpp
   src/nativeeventhandlerwin.cpp
+  src/network/controlapibridge.cpp
+  src/network/controlapiparsing.cpp
+  src/network/controlapiserver.cpp
   src/network/jsonwebtask.cpp
   src/network/networktask.cpp
   src/network/webtask.cpp
@@ -2731,6 +2734,7 @@ if(BUILD_TESTING)
     src/test/djappautopilot_test.cpp
     src/test/djappbraindbreader_test.cpp
     src/test/djappsuggestions_test.cpp
+    src/test/controlapi_test.cpp
     src/test/basetrackcache_test.cpp
     src/test/basetracktablemodel_test.cpp
     src/test/beatgridtest.cpp

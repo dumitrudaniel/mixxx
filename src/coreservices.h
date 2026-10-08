@@ -22,6 +22,8 @@ class TrackCollectionManager;
 class Library;
 class SkinControls;
 class ControlPushButton;
+class ControlApiBridge;
+class ControlApiServer;
 struct LibraryScanResultSummary;
 
 namespace mixxx {
@@ -150,6 +152,12 @@ class CoreServices : public QObject {
 
     std::unique_ptr<SkinControls> m_pSkinControls;
     std::unique_ptr<ControlPushButton> m_pTouchShift;
+
+    // DJ App local control/testing API (docs/decisions/0031). Started in
+    // initialize(), stopped first in finalize() (before PlayerManager is
+    // deleted, since the bridge reaches into it).
+    std::unique_ptr<ControlApiBridge> m_pControlApiBridge;
+    std::unique_ptr<ControlApiServer> m_pControlApiServer;
 
     Timer m_runtime_timer;
     const CmdlineArgs& m_cmdlineArgs;

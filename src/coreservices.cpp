@@ -30,6 +30,8 @@
 #include "mixer/playerinfo.h"
 #include "mixer/playermanager.h"
 #include "moc_coreservices.cpp"
+#include "network/controlapibridge.h"
+#include "network/controlapiserver.h"
 #include "preferences/dialog/dlgpreferences.h"
 #include "preferences/settingsmanager.h"
 #ifdef __MODPLUG__
@@ -752,6 +754,26 @@ void CoreServices::initialize(QApplication* pApp) {
         }
     }
 
+    // DJ App local control/testing API (docs/decisions/0031): lets any
+    // Claude Code session read/set controls and load tracks over a plain
+    // loopback-only HTTP API. [DJApp],ControlApiEnabled=0 turns it off.
+    {
+        const QString kDJAppGroup = QStringLiteral("[DJApp]");
+        const bool controlApiEnabled = pConfig->getValue(
+                ConfigKey(kDJAppGroup, QStringLiteral("ControlApiEnabled")), true);
+        if (controlApiEnabled) {
+            const int controlApiPort = pConfig->getValue(
+                    ConfigKey(kDJAppGroup, QStringLiteral("ControlApiPort")), 17000);
+            m_pControlApiBridge = std::make_unique<ControlApiBridge>(
+                    m_pPlayerManager.get(), this);
+            m_pControlApiServer = std::make_unique<ControlApiServer>(
+                    static_cast<quint16>(controlApiPort), m_pControlApiBridge.get());
+            m_pControlApiServer->start(); // logs whether it is listening, and on which port
+        } else {
+            qInfo() << "DJ App control API: disabled by [DJApp],ControlApiEnabled=0";
+        }
+    }
+
     m_isInitialized = true;
 
 #ifdef MIXXX_USE_QML
@@ -908,6 +930,15 @@ void CoreServices::finalize() {
 
     Timer t("CoreServices::~CoreServices");
     t.start();
+
+    // Stop the DJ App control API first: its worker thread reaches into
+    // PlayerManager through ControlApiBridge (on the main thread), so it
+    // must be gone before PlayerManager is deleted below.
+    if (m_pControlApiServer) {
+        m_pControlApiServer->stop();
+        m_pControlApiServer.reset();
+    }
+    m_pControlApiBridge.reset();
 
 #ifdef MIXXX_USE_QML
     // Delete all the QML singletons in order to prevent controller leaks
