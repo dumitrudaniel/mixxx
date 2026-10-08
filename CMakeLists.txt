@@ -1451,6 +1451,7 @@ add_library(
   src/mixer/automixtransitionmath.cpp
   src/mixer/automixvocalguard.cpp
   src/mixer/gridcorrector.cpp
+  src/mixer/stemtwin.cpp
   src/mixer/auxiliary.cpp
   src/mixer/baseplayer.cpp
   src/mixer/basetrackplayer.cpp
@@ -2715,6 +2716,7 @@ if(BUILD_TESTING)
     src/test/automixtransitionmath_test.cpp
     src/test/automixvocalguard_test.cpp
     src/test/gridcorrector_test.cpp
+    src/test/stemtwin_test.cpp
     src/test/basetrackcache_test.cpp
     src/test/basetracktablemodel_test.cpp
     src/test/beatgridtest.cpp

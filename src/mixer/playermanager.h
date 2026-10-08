@@ -29,6 +29,7 @@ class Sampler;
 class SamplerBank;
 class SoundManager;
 class ControlProxy;
+class StemTwinController;
 
 // For mocking PlayerManager
 class PlayerManagerInterface : public QObject {
@@ -305,6 +306,9 @@ class PlayerManager : public PlayerManagerInterface {
     // DJ App (ADR 0019): corrects off-beat grids from brain.db on track load.
     // Parented to this.
     GridCorrector* m_pGridCorrector;
+    // DJ App (ADR 0028, "opțiunea A"): substitutes a brain .stem.mp4 twin for
+    // an original with a current export. Parented to this.
+    StemTwinController* m_pStemTwinController;
 
     TrackAnalysisScheduler::Pointer m_pTrackAnalysisScheduler;
 

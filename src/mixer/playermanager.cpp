@@ -17,6 +17,7 @@
 #include "mixer/previewdeck.h"
 #include "mixer/sampler.h"
 #include "mixer/samplerbank.h"
+#include "mixer/stemtwin.h"
 #include "moc_playermanager.cpp"
 #include "preferences/dialog/dlgprefdeck.h"
 #include "soundio/soundmanager.h"
@@ -119,7 +120,8 @@ PlayerManager::PlayerManager(UserSettingsPointer pConfig,
                   ConfigKey(kAppGroup, QStringLiteral("num_auxiliaries")), true, true)),
           m_pTrackAnalysisScheduler(TrackAnalysisScheduler::NullPointer()),
           m_pAutomixTransitionController(nullptr),
-          m_pGridCorrector(new GridCorrector(pConfig, this)) {
+          m_pGridCorrector(new GridCorrector(pConfig, this)),
+          m_pStemTwinController(new StemTwinController(pConfig, this)) {
     m_pCONumDecks->addAlias(ConfigKey(kLegacyGroup, QStringLiteral("num_decks")));
     m_pCONumDecks->connectValueChangeRequest(this,
             &PlayerManager::slotChangeNumDecks, Qt::DirectConnection);
@@ -162,6 +164,7 @@ PlayerManager::~PlayerManager() {
 
 void PlayerManager::bindToLibrary(Library* pLibrary) {
     m_pLibrary = pLibrary;
+    m_pStemTwinController->setTrackCollectionManager(pLibrary->trackCollectionManager());
     const auto locker = lockMutex(&m_mutex);
     connect(pLibrary, &Library::loadTrackToPlayer, this, &PlayerManager::slotLoadTrackToPlayer);
     connect(pLibrary,
@@ -368,6 +371,7 @@ void PlayerManager::addDeckInner() {
                 &PlayerManager::slotAnalyzeTrack);
     }
     m_pGridCorrector->watchPlayer(pDeck);
+    m_pStemTwinController->watchPlayer(pDeck);
 
     m_players[handleGroup.handle()] = pDeck;
     m_decks.append(pDeck);
@@ -693,6 +697,11 @@ void PlayerManager::slotLoadTrackToPlayer(
     if (clone) {
         pPlayer->slotCloneDeck();
     } else {
+        // DJ App (ADR 0028): a deck plays a current brain stem twin instead
+        // of the original, if one exists. Samplers/preview decks never do.
+        if (isDeckGroup(group)) {
+            pTrack = m_pStemTwinController->substituteForLoad(pTrack, group);
+        }
 #ifdef __STEM__
         pPlayer->slotLoadTrack(pTrack, stemMask, play);
 #else
