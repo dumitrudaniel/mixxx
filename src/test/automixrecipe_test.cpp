@@ -82,9 +82,36 @@ TEST_F(AutomixRecipeTest, Standard8FollowsThePlan) {
     EXPECT_NEAR(0.0, outHigh->valueAt(20.0, 1.0), 1e-12);
     EXPECT_NEAR(1.0, inHigh->valueAt(20.0, 0.0), 1e-12);
 
-    // Phase 3 (bars 4-8): outgoing mids fall to kill.
-    EXPECT_GT(outMid->valueAt(24.0, 1.0), 0.0);
+    // Phase 3 (bars 4-5.5): outgoing mids fall to kill; from beat 22 (the
+    // last third) only the incoming track plays (Dan, 2026-10-08).
+    EXPECT_GT(outMid->valueAt(17.0, 1.0), 0.9);
+    EXPECT_NEAR(0.5, outMid->valueAt(19.0, 1.0), 1e-12);
+    EXPECT_NEAR(0.0, outMid->valueAt(22.0, 1.0), 1e-12);
     EXPECT_NEAR(0.0, outMid->valueAt(32.0, 1.0), 1e-12);
+}
+
+TEST_F(AutomixRecipeTest, OutgoingIsOutBeforeTheLastThird) {
+    // Every beatmatched built-in recipe kills all outgoing lanes by 11/16 of
+    // its length (Standard 8: beat 22) and has the incoming EQ at unity there.
+    // Fade curat has no beatmatched overlap and keeps its own 2-bar fade.
+    for (const QString& id : AutomixRecipeBook::selectorIds()) {
+        const AutomixRecipe* pRecipe = AutomixRecipeBook::builtin().find(id);
+        ASSERT_NE(nullptr, pRecipe) << id.toStdString();
+        if (!pRecipe->tempoMatch) {
+            continue;
+        }
+        const double outBeat = pRecipe->lengthBeats * 11.0 / 16.0;
+        const double swapBeat = pRecipe->lengthBeats / 2.0;
+        for (const AutomixLane& lane : pRecipe->lanes) {
+            if (lane.deck == AutomixDeckRole::Outgoing) {
+                EXPECT_NEAR(0.0, lane.valueAt(outBeat, 1.0), 1e-12) << id.toStdString();
+                // Untouched until the swap: the outgoing voice finishes its phrase.
+                EXPECT_DOUBLE_EQ(1.0, lane.valueAt(swapBeat, 1.0)) << id.toStdString();
+            } else {
+                EXPECT_NEAR(1.0, lane.valueAt(outBeat, 0.0), 1e-12) << id.toStdString();
+            }
+        }
+    }
 }
 
 TEST_F(AutomixRecipeTest, Standard8BassSwapIsEqualPower) {

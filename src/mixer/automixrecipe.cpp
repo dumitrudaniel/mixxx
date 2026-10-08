@@ -30,7 +30,7 @@ constexpr const char* kBuiltinJsonHead = R"JSON({
 constexpr const char* kBuiltinJsonUrgenta2 = R"JSON(    {
       "id": "urgenta2",
       "name": "Urgenta 2",
-      "notes": "2 bare: aceeasi reteta ca Standard 8, comprimata. Salvare rapida.",
+      "notes": "2 bare: aceeasi reteta ca Standard 8, comprimata. Salvare rapida. Piesa veche iese complet pana la timpul 5.5 (11/16 din reteta).",
       "length_bars": 2,
       "prepare_incoming": { "eq_low": "kill", "eq_mid": "kill", "eq_high": "kill" },
       "lanes": [
@@ -50,7 +50,7 @@ constexpr const char* kBuiltinJsonUrgenta2 = R"JSON(    {
           { "bar": 1.25, "value": "kill", "shape": "cos" } ] },
         { "deck": "outgoing", "param": "eq_mid", "points": [
           { "bar": 0, "value": "current" }, { "bar": 1, "value": "current" },
-          { "bar": 2, "value": "kill", "shape": "cos" } ] }
+          { "bar": 1.375, "value": "kill", "shape": "smoothstep" } ] }
       ]
     },
 )JSON";
@@ -58,7 +58,7 @@ constexpr const char* kBuiltinJsonUrgenta2 = R"JSON(    {
 constexpr const char* kBuiltinJsonScurt4 = R"JSON(    {
       "id": "scurt4",
       "name": "Scurt 4",
-      "notes": "4 bare: grila nesigura, semba/kompa live, mod scoala.",
+      "notes": "4 bare: grila nesigura, semba/kompa live, mod scoala. Piesa veche iese complet pana la bara 2.75 (timpul 11, 11/16 din reteta).",
       "length_bars": 4,
       "prepare_incoming": { "eq_low": "kill", "eq_mid": "kill", "eq_high": "kill" },
       "lanes": [
@@ -78,7 +78,7 @@ constexpr const char* kBuiltinJsonScurt4 = R"JSON(    {
           { "bar": 2.5, "value": "kill", "shape": "cos" } ] },
         { "deck": "outgoing", "param": "eq_mid", "points": [
           { "bar": 0, "value": "current" }, { "bar": 2, "value": "current" },
-          { "bar": 4, "value": "kill", "shape": "cos" } ] }
+          { "bar": 2.75, "value": "kill", "shape": "smoothstep" } ] }
       ]
     },
 )JSON";
@@ -86,7 +86,7 @@ constexpr const char* kBuiltinJsonScurt4 = R"JSON(    {
 constexpr const char* kBuiltinJsonStandard8 = R"JSON(    {
       "id": "standard8",
       "name": "Standard 8",
-      "notes": "Implicit. Faza 1 (bare 0-4): mediile piesei noi urca, basul ei ramane taiat, inaltele ei doar pana la -12 dB. Faza 2 (downbeat bara 4): bas schimbat in 1 timp, inalte in 1 bara, equal-power. Faza 3 (bare 4-8): mediile piesei vechi coboara la kill. Filtrul si intrarea mai usoara in volum sunt oprite (enabled false); pune true ca sa le incerci.",
+      "notes": "Implicit. Faza 1 (bare 0-4): mediile piesei noi urca, basul ei ramane taiat, inaltele ei doar pana la -12 dB. Faza 2 (downbeat bara 4): bas schimbat in 1 timp, inalte in 1 bara, equal-power. Faza 3 (bare 4-5.5): mediile piesei vechi coboara la kill (smoothstep); din timpul 22 (ultima treime) se aude doar piesa noua (Dan, 2026-10-08). Filtrul si intrarea mai usoara in volum sunt oprite (enabled false); pune true ca sa le incerci.",
       "length_bars": 8,
       "prepare_incoming": { "eq_low": "kill", "eq_mid": "kill", "eq_high": "kill" },
       "lanes": [
@@ -106,10 +106,10 @@ constexpr const char* kBuiltinJsonStandard8 = R"JSON(    {
           { "bar": 5, "value": "kill", "shape": "cos" } ] },
         { "deck": "outgoing", "param": "eq_mid", "points": [
           { "bar": 0, "value": "current" }, { "bar": 4, "value": "current" },
-          { "bar": 8, "value": "kill", "shape": "cos" } ] },
+          { "bar": 5.5, "value": "kill", "shape": "smoothstep" } ] },
         { "deck": "outgoing", "param": "filter", "enabled": false, "points": [
           { "bar": 0, "value": "current" }, { "bar": 4, "value": "current" },
-          { "bar": 8, "value": 0.75, "shape": "smoothstep" } ] },
+          { "bar": 5.5, "value": 0.75, "shape": "smoothstep" } ] },
         { "deck": "incoming", "param": "volume", "enabled": false, "points": [
           { "bar": 0, "value": "-2dB" }, { "bar": 2, "value": "current", "shape": "sin" } ] }
       ]
@@ -119,7 +119,7 @@ constexpr const char* kBuiltinJsonStandard8 = R"JSON(    {
 constexpr const char* kBuiltinJsonLung16 = R"JSON(    {
       "id": "lung16",
       "name": "Lung 16",
-      "notes": "16 bare: urban kiz, tarraxo, intro/outro lungi. Basul se schimba in 2 timpi.",
+      "notes": "16 bare: urban kiz, tarraxo, intro/outro lungi. Basul se schimba in 2 timpi. Piesa veche iese complet pana la bara 11 (timpul 44, 11/16 din reteta).",
       "length_bars": 16,
       "prepare_incoming": { "eq_low": "kill", "eq_mid": "kill", "eq_high": "kill" },
       "lanes": [
@@ -139,7 +139,7 @@ constexpr const char* kBuiltinJsonLung16 = R"JSON(    {
           { "bar": 9, "value": "kill", "shape": "cos" } ] },
         { "deck": "outgoing", "param": "eq_mid", "points": [
           { "bar": 0, "value": "current" }, { "bar": 8, "value": "current" },
-          { "bar": 16, "value": "kill", "shape": "cos" } ] }
+          { "bar": 11, "value": "kill", "shape": "smoothstep" } ] }
       ]
     },
 )JSON";
@@ -147,7 +147,7 @@ constexpr const char* kBuiltinJsonLung16 = R"JSON(    {
 constexpr const char* kBuiltinJsonFadeCurat = R"JSON(    {
       "id": "fade_curat",
       "name": "Fade curat",
-      "notes": "Fara beatmatch: tempo peste buget sau piese incompatibile. Piesa veche se stinge in 2 bare; piesa noua porneste la bara 1.5.",
+      "notes": "Fara beatmatch: tempo peste buget sau piese incompatibile. Piesa veche se stinge in 2 bare; piesa noua porneste la bara 1.5. Regula 11/16 nu se aplica: suprapunerea e doar ultima jumatate de bara, scoaterea mai devreme ar lasa liniste.",
       "length_bars": 2,
       "tempo_match": false,
       "incoming_play_at_bar": 1.5,
