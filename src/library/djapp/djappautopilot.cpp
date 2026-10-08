@@ -4,6 +4,7 @@
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QtConcurrentRun>
 #include <QtDebug>
 
 #include "library/djapp/braindbreader.h"
@@ -177,6 +178,38 @@ void DJAppAutopilot::triggerMix(int playingDeckNumber) {
     m_awaitingLoadDeck = 0;
 }
 
+namespace {
+struct LibraryPoolRead {
+    QStringList poolLocations;
+    QHash<QString, DJAppLibraryTrack> libraryByKey;
+    QStringList playedToday;
+};
+
+// Mixxx's db connection pool hands out one connection per calling thread; the
+// main/UI thread doesn't get one here (same reason DlgDJAppAnalysis::refresh
+// reads via QtConcurrent::run, "like the external library features do" -
+// without it mixxxDb.isOpen() is false and every suggestion looks outside
+// the pool, so the autopilot silently finds nothing to load).
+LibraryPoolRead readLibraryPool(mixxx::DbConnectionPoolPtr pPool) {
+    LibraryPoolRead out;
+    const mixxx::DbConnectionPooler pooler(pPool);
+    const QSqlDatabase mixxxDb = mixxx::DbConnectionPooled(pPool);
+    if (!mixxxDb.isOpen()) {
+        return out;
+    }
+    QString libraryError;
+    const QList<DJAppLibraryTrack> tracks = DJAppAnalysis::readLibraryTracks(mixxxDb, &libraryError);
+    for (const DJAppLibraryTrack& t : tracks) {
+        out.poolLocations << t.location;
+        out.libraryByKey.insert(BrainDbReader::locationKey(t.location), t);
+    }
+    QString playedError;
+    const QDateTime dayStart = DJAppSuggestions::djDayStart(QDateTime::currentDateTime());
+    out.playedToday = DJAppSuggestions::readPlayedSince(mixxxDb, dayStart.toUTC(), &playedError);
+    return out;
+}
+} // namespace
+
 void DJAppAutopilot::pickAndLoad(int playingDeckNumber, int otherDeckNumber) {
     const TrackPointer pSource = PlayerInfo::instance().getTrackInfo(
             PlayerManager::groupForDeck(playingDeckNumber - 1));
@@ -185,25 +218,14 @@ void DJAppAutopilot::pickAndLoad(int playingDeckNumber, int otherDeckNumber) {
     }
     const QString sourceLocation = pSource->getLocation();
 
-    const mixxx::DbConnectionPoolPtr pPool = m_pLibrary->dbConnectionPool();
-    const mixxx::DbConnectionPooler pooler(pPool);
-    const QSqlDatabase mixxxDb = mixxx::DbConnectionPooled(pPool);
-
-    QStringList poolLocations;
-    QHash<QString, DJAppLibraryTrack> libraryByKey;
-    QString playedError;
-    QStringList playedToday;
-    if (mixxxDb.isOpen()) {
-        QString libraryError;
-        const QList<DJAppLibraryTrack> tracks =
-                DJAppAnalysis::readLibraryTracks(mixxxDb, &libraryError);
-        for (const DJAppLibraryTrack& t : tracks) {
-            poolLocations << t.location;
-            libraryByKey.insert(BrainDbReader::locationKey(t.location), t);
-        }
-        const QDateTime dayStart = DJAppSuggestions::djDayStart(QDateTime::currentDateTime());
-        playedToday = DJAppSuggestions::readPlayedSince(mixxxDb, dayStart.toUTC(), &playedError);
-    }
+    // Brief, bounded wait (a few dozen rows, same read Analiza does): simpler
+    // and safer right now than restructuring this tick into an async
+    // continuation, and it only runs at a mix-out point, not every tick.
+    const LibraryPoolRead pool =
+            QtConcurrent::run(&readLibraryPool, m_pLibrary->dbConnectionPool()).result();
+    const QStringList& poolLocations = pool.poolLocations;
+    const QHash<QString, DJAppLibraryTrack>& libraryByKey = pool.libraryByKey;
+    const QStringList& playedToday = pool.playedToday;
 
     QStringList excludeOnDecks;
     for (int d = 0; d < 2; ++d) {
