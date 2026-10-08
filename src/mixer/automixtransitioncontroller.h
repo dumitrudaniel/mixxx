@@ -137,7 +137,8 @@ class AutomixTransitionController : public QObject {
         double glideBeats = 0.0;
         // Vocals stem lane scaled by the vocal guard gain of lane.deck.
         bool vocalGuard = false;
-        // Bass/other/vocals stem lane scaled by the key guard gain of lane.deck.
+        // Bass/other/vocals stem lane scaled by the key guard gain of lane.deck
+        // (bass at the bass swap, other/vocals at the melody swap).
         bool keyGuard = false;
     };
 
@@ -162,6 +163,8 @@ class AutomixTransitionController : public QObject {
     QString planVocalGuard();
     // Start time: decides whether the key guard runs (stems on both decks,
     // both keys known and clashing) and plans it. Returns why it is off.
+    // Called after planVocalGuard(): uses m_vocalGuardPlan when the vocal
+    // guard is active (melody swap at the vocal handover).
     QString planKeyGuard();
     // A transition cancelled by a track change must not leave a stem muted
     // on a deck that keeps playing: guard lanes go back to their curve value

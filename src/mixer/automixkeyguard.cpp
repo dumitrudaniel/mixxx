@@ -3,10 +3,12 @@
 #include <algorithm>
 #include <cmath>
 
+#include "mixer/automixvocalguard.h"
 #include "track/keyutils.h"
 
 namespace {
 constexpr double kHalfPi = 1.57079632679489661923;
+constexpr double kBeatsPerBar = 4.0;
 
 // 0 before `start`, 1 after `start + length`, linear in between.
 double fadeProgress(double beat, double start, double length) {
@@ -17,12 +19,12 @@ double fadeProgress(double beat, double start, double length) {
 }
 } // namespace
 
-double AutomixKeyGuardPlan::outgoingGain(double beat) const {
-    return std::cos(fadeProgress(beat, swapBeat, fadeBeats) * kHalfPi);
+double AutomixKeyGuardPlan::outgoingGain(AutomixKeyGuardStem stem, double beat) const {
+    return std::cos(fadeProgress(beat, swapBeatOf(stem), fadeBeats) * kHalfPi);
 }
 
-double AutomixKeyGuardPlan::incomingGain(double beat) const {
-    return std::sin(fadeProgress(beat, swapBeat, fadeBeats) * kHalfPi);
+double AutomixKeyGuardPlan::incomingGain(AutomixKeyGuardStem stem, double beat) const {
+    return std::sin(fadeProgress(beat, swapBeatOf(stem), fadeBeats) * kHalfPi);
 }
 
 // static
@@ -46,9 +48,27 @@ bool AutomixKeyGuardPlanner::keysClash(mixxx::track::io::key::ChromaticKey outgo
 }
 
 // static
-AutomixKeyGuardPlan AutomixKeyGuardPlanner::plan(double lengthBeats, double fadeBeats) {
+double AutomixKeyGuardPlanner::melodySwapBeat(double swapBeat,
+        const AutomixVocalGuardPlan* pVocalPlan,
+        double incomingPlayAtBeat) {
+    if (!pVocalPlan) {
+        return swapBeat;
+    }
+    const double earliest = std::max(
+            pVocalPlan->outgoingFadeStart, incomingPlayAtBeat + kLeadInBeats);
+    const double snapped = std::ceil((earliest - kBarSnapToleranceBeats) / kBeatsPerBar) *
+            kBeatsPerBar;
+    return std::min(std::max(snapped, 0.0), swapBeat);
+}
+
+// static
+AutomixKeyGuardPlan AutomixKeyGuardPlanner::plan(double lengthBeats,
+        double fadeBeats,
+        const AutomixVocalGuardPlan* pVocalPlan,
+        double incomingPlayAtBeat) {
     AutomixKeyGuardPlan plan;
     plan.swapBeat = std::max(0.0, lengthBeats / 2.0);
+    plan.melodySwapBeat = melodySwapBeat(plan.swapBeat, pVocalPlan, incomingPlayAtBeat);
     plan.fadeBeats = std::max(0.0, fadeBeats);
     return plan;
 }

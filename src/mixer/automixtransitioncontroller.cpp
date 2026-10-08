@@ -52,6 +52,13 @@ bool isHarmonicStem(AutomixParam param) {
             param == AutomixParam::StemVocals;
 }
 
+// The bass swaps with the EQ at half the recipe; other + vocals may swap
+// earlier, at the vocal handover (AutomixKeyGuardPlanner::melodySwapBeat).
+AutomixKeyGuardStem keyGuardStem(AutomixParam param) {
+    return param == AutomixParam::StemBass ? AutomixKeyGuardStem::Bass
+                                           : AutomixKeyGuardStem::Melody;
+}
+
 // "[Channel1]" + 4 -> "[Channel1_Stem4]" (Mixxx 2.6 stem groups, file order).
 QString stemGroup(const QString& deckGroup, int stemNumber) {
     return deckGroup.left(deckGroup.size() - 1) + QStringLiteral("_Stem%1]").arg(stemNumber);
@@ -544,15 +551,33 @@ QString AutomixTransitionController::planKeyGuard() {
     if (!AutomixKeyGuardPlanner::keysClash(outgoingKey, incomingKey)) {
         return QStringLiteral("keys fit (") + keys + QStringLiteral(")");
     }
-    m_keyGuardPlan = AutomixKeyGuardPlanner::plan(
-            m_recipe.lengthBeats, m_recipe.keyGuard.fadeBeats);
+    // Runs after planVocalGuard(): with the vocal guard active, the melody
+    // (other + vocals) follows the outgoing voice's handover when that comes
+    // before the bass swap.
+    m_keyGuardPlan = AutomixKeyGuardPlanner::plan(m_recipe.lengthBeats,
+            m_recipe.keyGuard.fadeBeats,
+            m_vocalGuardActive ? &m_vocalGuardPlan : nullptr,
+            m_recipe.incomingPlayAtBeat);
     m_keyGuardActive = true;
     m_runLengthBeats = std::max(m_runLengthBeats, m_keyGuardPlan.endBeat());
-    qInfo().noquote() << QStringLiteral("Automix: key guard on (%1): only the incoming drums "
-                                        "until beat %2, harmonic stems swap over %3 beats")
-                                 .arg(keys,
-                                         QString::number(m_keyGuardPlan.swapBeat, 'f', 2),
-                                         QString::number(m_keyGuardPlan.fadeBeats, 'f', 2));
+    const auto beats = [](double value) {
+        return QString::number(value, 'f', 2);
+    };
+    if (m_keyGuardPlan.earlyMelody()) {
+        qInfo().noquote() << QStringLiteral("Automix: key guard on (%1): only the incoming drums "
+                                            "until beat %2, then other + vocals swap at the "
+                                            "vocal handover, bass at beat %3, over %4 beats")
+                                     .arg(keys,
+                                             beats(m_keyGuardPlan.melodySwapBeat),
+                                             beats(m_keyGuardPlan.swapBeat),
+                                             beats(m_keyGuardPlan.fadeBeats));
+    } else {
+        qInfo().noquote() << QStringLiteral("Automix: key guard on (%1): only the incoming drums "
+                                            "until beat %2, harmonic stems swap over %3 beats")
+                                     .arg(keys,
+                                             beats(m_keyGuardPlan.swapBeat),
+                                             beats(m_keyGuardPlan.fadeBeats));
+    }
     return QString();
 }
 
@@ -664,9 +689,10 @@ double AutomixTransitionController::laneTarget(const LaneRuntime& runtime, doubl
                             : m_vocalGuardPlan.incomingGain(beat);
     }
     if (runtime.keyGuard) {
+        const AutomixKeyGuardStem stem = keyGuardStem(runtime.lane.param);
         gain = std::min(gain,
-                outgoingRole ? m_keyGuardPlan.outgoingGain(beat)
-                             : m_keyGuardPlan.incomingGain(beat));
+                outgoingRole ? m_keyGuardPlan.outgoingGain(stem, beat)
+                             : m_keyGuardPlan.incomingGain(stem, beat));
     }
     return value * gain;
 }

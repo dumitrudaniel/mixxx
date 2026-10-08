@@ -664,7 +664,10 @@ void Tooltips::addStandardTooltips() {
             << tr("GARDA TON (aprins): daca tonalitatile celor doua piese nu se "
                   "potrivesc pe roata Camelot, din piesa noua intra intai doar "
                   "tobele; la jumatatea tranzitiei basul, instrumentele si vocea "
-                  "trec dintr-o piesa in cealalta. TON LIBER (stins): tranzitie "
+                  "trec dintr-o piesa in cealalta. Cu GARDA VOCE, daca vocea veche "
+                  "se termina mai devreme, instrumentele si vocea trec la sfarsitul "
+                  "frazei ei (dupa cel putin o masura de tobe), iar basul tot la "
+                  "jumatate. TON LIBER (stins): tranzitie "
                   "doar din EQ. Merge doar pe piese cu stems si cu tonalitate "
                   "analizata. Se citeste la pornirea tranzitiei. Atingi un "
                   "knob de stem = il preiei manual.");
