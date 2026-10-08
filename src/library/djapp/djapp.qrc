@@ -1,0 +1,6 @@
+<!DOCTYPE RCC><RCC version="1.0">
+<!-- DJ App (docs/decisions/0029): resources of the "DJ App" library feature. -->
+<qresource prefix="/images/library">
+    <file alias="ic_library_djapp.svg">ic_library_djapp.svg</file>
+</qresource>
+</RCC>
