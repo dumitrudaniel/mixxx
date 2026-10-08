@@ -7,7 +7,9 @@
 #include "preferences/usersettings.h"
 #include "util/parented_ptr.h"
 
+class DJAppAutopilot;
 class DlgDJAppAnalysis;
+class DlgDJAppAutomix;
 class DlgDJAppSuggestions;
 class Library;
 class TreeItem;
@@ -44,4 +46,6 @@ class DJAppFeature : public LibraryFeature {
     TreeItem* m_pAnalysisItem;
     QPointer<DlgDJAppAnalysis> m_pAnalysisView;
     QPointer<DlgDJAppSuggestions> m_pSuggestionsView;
+    QPointer<DlgDJAppAutomix> m_pAutomixView;
+    parented_ptr<DJAppAutopilot> m_pAutopilot;
 };

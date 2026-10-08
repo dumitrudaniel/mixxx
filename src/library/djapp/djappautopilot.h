@@ -1,0 +1,106 @@
+#pragma once
+
+#include <QObject>
+#include <QString>
+#include <QTimer>
+#include <optional>
+
+#include "control/controlproxy.h"
+#include "control/controlpushbutton.h"
+#include "library/djapp/djappautopilotlogic.h"
+#include "preferences/usersettings.h"
+#include "track/track_decl.h"
+#include "util/class.h"
+
+class Library;
+
+// DJ App automix autopilot (docs/plan-ui-integrare.md §6 Etapa 5, cut down
+// for a quick live test, 2026-10-09). OFF by default. When ON, it fills the
+// gap Dan would otherwise fill by hand: when the deck that is playing
+// reaches its track's recommended mix-out point (brain.db mix_points, for
+// the active recipe's length), it loads the best suggestion
+// (DJAppSuggestions::query) onto the other deck if nothing is there yet,
+// then taps the existing MIX trigger -- the same ControlObject a button
+// press sets (mixer/automixtransitioncontroller.h), so every refusal rule
+// (crossfader centered, playing, has grid, ...) still applies: the engine
+// itself decides, this class only presses the button for Dan.
+//
+// Never touches: crossfader, faders, sync, the now-free deck after a
+// transition (its old track is left loaded; see the `overrideEmptyDeck`
+// comment in djappautopilotlogic.h). Never writes brain.db or mixxxdb.sqlite
+// (read-only through BrainDbReader / Mixxx's own library tables, like every
+// other DJ App reader).
+//
+// Pure decision logic lives in djappautopilotlogic.h/.cpp (unit tested);
+// this class only supplies live values and executes the result on a 500 ms
+// timer (no need for the automix engine's 20 ms tick: brain.db reads happen
+// when a deck's track changes, not on every tick).
+class DJAppAutopilot : public QObject {
+    Q_OBJECT
+  public:
+    DJAppAutopilot(UserSettingsPointer pConfig, Library* pLibrary, QObject* pParent);
+    ~DJAppAutopilot() override;
+
+    bool isEnabled() const;
+
+  public slots:
+    // "PORNEȘTE AUTOMIX" / "OPREȘTE AUTOMIX" toggle button.
+    void setEnabled(bool enabled);
+
+  signals:
+    void statusTextChanged(const QString& text);
+    void enabledChanged(bool enabled);
+    // Forwarded by DJAppFeature exactly like DlgDJAppSuggestions::loadTrackToPlayer.
+    void loadTrackToPlayer(TrackPointer pTrack, const QString& group, bool play);
+
+  private slots:
+    void tick();
+
+  private:
+    struct DeckProxies {
+        explicit DeckProxies(const QString& group);
+        ControlProxy play;
+        ControlProxy trackLoaded;
+        ControlProxy playposition;
+        ControlProxy duration;
+    };
+
+    // Re-reads brain.db's mix_points for a deck's track only when that
+    // deck's track (or the active recipe's length) changed since the last
+    // tick -- never inside the 500 ms poll itself.
+    void refreshMixOutCache(int deckNumber);
+    double activeRecipeLengthBeats() const;
+    std::optional<double> readMixOutSec(const QString& location, double lengthBeats) const;
+
+    void pickAndLoad(int playingDeckNumber, int otherDeckNumber);
+    void triggerMix(int playingDeckNumber);
+    void setStatus(const djapp::autopilot::Status& status);
+
+    QString brainDbPath() const;
+
+    UserSettingsPointer m_pConfig;
+    Library* m_pLibrary;
+
+    ControlPushButton m_enabled;
+    ControlProxy m_engineState; // [AutomixTransition],state
+    ControlProxy m_recipeSelector; // [AutomixTransition],recipe
+    ControlProxy m_triggerToDeck2; // [Channel1],automix_transition_to_2
+    ControlProxy m_triggerToDeck1; // [Channel2],automix_transition_to_1
+
+    DeckProxies m_deck1;
+    DeckProxies m_deck2;
+
+    QTimer m_tickTimer;
+
+    QString m_cachedLocation[2];
+    double m_cachedRecipeLengthBeats[2] = {-1.0, -1.0};
+    std::optional<double> m_cachedMixOutSec[2];
+
+    int m_lastEngineState = 0;
+    int m_pendingFromDeck = 0;
+    int m_overrideEmptyDeck = 0;
+    int m_awaitingLoadDeck = 0;
+    bool m_lastEnabled = false;
+
+    DISALLOW_COPY_AND_ASSIGN(DJAppAutopilot);
+};

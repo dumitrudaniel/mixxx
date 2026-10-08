@@ -173,7 +173,10 @@ QTableView* newSuggestionTable(DJAppSuggestionsTableModel* pModel, QWidget* pPar
     pView->setAlternatingRowColors(true);
     pView->setWordWrap(false);
     pView->verticalHeader()->hide();
-    pView->verticalHeader()->setDefaultSectionSize(22);
+    // Row height from the actual font metrics, not a hardcoded pixel guess: a fixed value
+    // (22) overlapped text on a laptop whose theme/DPI rendered the library font larger.
+    pView->verticalHeader()->setMinimumSectionSize(pView->fontMetrics().height() + 6);
+    pView->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     pView->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
     pView->horizontalHeader()->setSectionResizeMode(
             DJAppSuggestionsTableModel::kTrack, QHeaderView::Stretch);

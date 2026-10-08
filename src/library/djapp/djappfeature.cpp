@@ -3,7 +3,9 @@
 #include <QTimer>
 
 #include "controllers/keyboard/keyboardeventfilter.h"
+#include "library/djapp/djappautopilot.h"
 #include "library/djapp/dlgdjappanalysis.h"
+#include "library/djapp/dlgdjappautomix.h"
 #include "library/djapp/dlgdjappplaceholder.h"
 #include "library/djapp/dlgdjappsuggestions.h"
 #include "library/library.h"
@@ -58,7 +60,24 @@ void DJAppFeature::bindLibraryWidget(WLibrary* pLibraryWidget, KeyboardEventFilt
         pLibraryWidget->registerView(name, pView);
     };
     registerPlaceholder(kViewSetAssistant, DlgDJAppPlaceholder::Kind::SetAssistant);
-    registerPlaceholder(kViewAutomix, DlgDJAppPlaceholder::Kind::Automix);
+
+    if (!m_pAutopilot) {
+        m_pAutopilot = make_parented<DJAppAutopilot>(m_pConfig, m_pLibrary, this);
+    }
+    m_pAutomixView = new DlgDJAppAutomix(pLibraryWidget, m_pAutopilot);
+    m_pAutomixView->installEventFilter(pKeyboard);
+    pLibraryWidget->registerView(kViewAutomix, m_pAutomixView);
+    connect(m_pAutopilot.get(),
+            &DJAppAutopilot::loadTrackToPlayer,
+            this,
+            [this](TrackPointer pTrack, const QString& group, bool play) {
+                emit loadTrackToPlayer(pTrack,
+                        group,
+#ifdef __STEM__
+                        mixxx::StemChannelSelection(),
+#endif
+                        play);
+            });
 
     m_pSuggestionsView = new DlgDJAppSuggestions(pLibraryWidget, m_pConfig, m_pLibrary);
     m_pSuggestionsView->installEventFilter(pKeyboard);
