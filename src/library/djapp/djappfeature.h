@@ -8,6 +8,7 @@
 #include "util/parented_ptr.h"
 
 class DlgDJAppAnalysis;
+class DlgDJAppSuggestions;
 class Library;
 class TreeItem;
 class WLibrary;
@@ -42,4 +43,5 @@ class DJAppFeature : public LibraryFeature {
     parented_ptr<TreeItemModel> m_pSidebarModel;
     TreeItem* m_pAnalysisItem;
     QPointer<DlgDJAppAnalysis> m_pAnalysisView;
+    QPointer<DlgDJAppSuggestions> m_pSuggestionsView;
 };

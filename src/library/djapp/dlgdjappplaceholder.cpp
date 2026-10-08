@@ -8,7 +8,6 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
-#include <QLocale>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QRadioButton>
@@ -17,9 +16,7 @@
 #include <QVBoxLayout>
 
 #include "library/djapp/djappui.h"
-#include "mixer/playerinfo.h"
 #include "moc_dlgdjappplaceholder.cpp"
-#include "track/track.h"
 #include "widget/wlibrary.h"
 
 namespace {
@@ -68,25 +65,16 @@ QHBoxLayout* row(std::initializer_list<QWidget*> widgets, bool stretchAtEnd = tr
     return pLayout;
 }
 
-QString bpmText(double bpm) {
-    static const QLocale kRomanian(QLocale::Romanian, QLocale::Romania);
-    return kRomanian.toString(bpm, 'f', 1);
-}
-
 } // namespace
 
 DlgDJAppPlaceholder::DlgDJAppPlaceholder(WLibrary* pParent, Kind kind)
         : QWidget(pParent),
-          m_kind(kind),
-          m_pNowPlayingLabel(nullptr) {
+          m_kind(kind) {
     djappui::setupView(this);
     auto* pLayout = new QVBoxLayout(this);
     pLayout->setContentsMargins(8, 6, 8, 6);
     pLayout->setSpacing(6);
     switch (m_kind) {
-    case Kind::Suggestions:
-        buildSuggestions();
-        break;
     case Kind::SetAssistant:
         buildSetAssistant();
         break;
@@ -94,50 +82,6 @@ DlgDJAppPlaceholder::DlgDJAppPlaceholder(WLibrary* pParent, Kind kind)
         buildAutomix();
         break;
     }
-}
-
-void DlgDJAppPlaceholder::buildSuggestions() {
-    auto* pLayout = static_cast<QVBoxLayout*>(layout());
-    m_pNowPlayingLabel = djappui::newTitle(QString(), this);
-    QLabel* pBrainLabel =
-            djappui::newMutedLabel(QStringLiteral("brain ○ (serviciul vine în Etapa 2)"), this);
-    pBrainLabel->setWordWrap(false);
-    pLayout->addLayout(row({m_pNowPlayingLabel, pBrainLabel}));
-    pLayout->addWidget(djappui::newWorkInProgressBanner(
-            QStringLiteral(
-                    "<b>În lucru (Etapa 3).</b> Sugestiile se citesc din brain.db, din "
-                    "<code>pair_scores</code> (indexul de perechi, ADR 0026, index-builder), "
-                    "pentru piesa care cântă. Vederea se activează când contractul indexului e "
-                    "aprobat; până atunci nu inventăm schema."),
-            this));
-    pLayout->addLayout(row({new QLabel(QStringLiteral("Din:"), this),
-            disabledComboBox({QStringLiteral("Toată biblioteca"),
-                                     QStringLiteral("un crate"),
-                                     QStringLiteral("un playlist")},
-                    this),
-            disabledCheckBox(QStringLiteral("doar tonalități potrivite"), true, this),
-            disabledCheckBox(QStringLiteral("neanalizate"), false, this)}));
-    pLayout->addWidget(emptyTable({QStringLiteral("#"),
-                                          QStringLiteral("Scor"),
-                                          QStringLiteral("Piesa"),
-                                          QStringLiteral("BPM"),
-                                          QStringLiteral("Key"),
-                                          QStringLiteral("Rețetă"),
-                                          QStringLiteral("De ce")},
-                               2, // Piesa
-                               this),
-            1);
-    pLayout->addLayout(row({disabledButton(QStringLiteral("Încarcă pe deck-ul liber"), this),
-            disabledButton(QStringLiteral("Preascultă"), this),
-            disabledButton(QStringLiteral("Adaugă după curentă"), this),
-            disabledButton(QStringLiteral("Nu acum"), this),
-            disabledButton(QStringLiteral("De ce?"), this)}));
-
-    connect(&PlayerInfo::instance(),
-            &PlayerInfo::currentPlayingTrackChanged,
-            this,
-            &DlgDJAppPlaceholder::slotCurrentPlayingTrackChanged);
-    slotCurrentPlayingTrackChanged(PlayerInfo::instance().getCurrentPlayingTrack());
 }
 
 void DlgDJAppPlaceholder::buildSetAssistant() {
@@ -271,28 +215,4 @@ void DlgDJAppPlaceholder::onShow() {
 
 bool DlgDJAppPlaceholder::hasFocus() const {
     return QWidget::hasFocus();
-}
-
-void DlgDJAppPlaceholder::slotCurrentPlayingTrackChanged(TrackPointer pTrack) {
-    if (!m_pNowPlayingLabel) {
-        return;
-    }
-    if (!pTrack) {
-        m_pNowPlayingLabel->setText(QStringLiteral("Sugestii după: — (nicio piesă nu cântă)"));
-        return;
-    }
-    QStringList parts;
-    parts << pTrack->getInfo();
-    if (pTrack->getBpm() > 0.0) {
-        parts << bpmText(pTrack->getBpm());
-    }
-    if (!pTrack->getKeyText().isEmpty()) {
-        parts << pTrack->getKeyText();
-    }
-    const int deck = PlayerInfo::instance().getCurrentPlayingDeck();
-    if (deck >= 0) {
-        parts << QStringLiteral("deck %1").arg(deck + 1);
-    }
-    m_pNowPlayingLabel->setText(
-            QStringLiteral("Sugestii după: ") + parts.join(QStringLiteral(" · ")));
 }

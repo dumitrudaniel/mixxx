@@ -5,6 +5,7 @@
 #include "controllers/keyboard/keyboardeventfilter.h"
 #include "library/djapp/dlgdjappanalysis.h"
 #include "library/djapp/dlgdjappplaceholder.h"
+#include "library/djapp/dlgdjappsuggestions.h"
 #include "library/library.h"
 #include "library/treeitem.h"
 #include "library/treeitemmodel.h"
@@ -56,9 +57,23 @@ void DJAppFeature::bindLibraryWidget(WLibrary* pLibraryWidget, KeyboardEventFilt
         pView->installEventFilter(pKeyboard);
         pLibraryWidget->registerView(name, pView);
     };
-    registerPlaceholder(kViewSuggestions, DlgDJAppPlaceholder::Kind::Suggestions);
     registerPlaceholder(kViewSetAssistant, DlgDJAppPlaceholder::Kind::SetAssistant);
     registerPlaceholder(kViewAutomix, DlgDJAppPlaceholder::Kind::Automix);
+
+    m_pSuggestionsView = new DlgDJAppSuggestions(pLibraryWidget, m_pConfig, m_pLibrary);
+    m_pSuggestionsView->installEventFilter(pKeyboard);
+    pLibraryWidget->registerView(kViewSuggestions, m_pSuggestionsView);
+    connect(m_pSuggestionsView.data(),
+            &DlgDJAppSuggestions::loadTrackToPlayer,
+            this,
+            [this](TrackPointer pTrack, const QString& group, bool play) {
+                emit loadTrackToPlayer(pTrack,
+                        group,
+#ifdef __STEM__
+                        mixxx::StemChannelSelection(),
+#endif
+                        play);
+            });
 
     m_pAnalysisView = new DlgDJAppAnalysis(pLibraryWidget, m_pConfig, m_pLibrary);
     m_pAnalysisView->installEventFilter(pKeyboard);

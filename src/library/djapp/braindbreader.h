@@ -2,8 +2,11 @@
 
 #include <QDateTime>
 #include <QHash>
+#include <QSet>
+#include <QSqlDatabase>
 #include <QString>
 #include <QStringList>
+#include <functional>
 #include <optional>
 
 // DJ App (docs/decisions/0029): read-only access to brain.db for the "DJ App"
@@ -132,6 +135,17 @@ class BrainDbReader {
     // read-only. Never creates the file. `busyTimeoutMs` bounds the wait for
     // a writer's lock (delete-journal mode); WAL readers never wait.
     static BrainSnapshot read(const QString& dbPath, int busyTimeoutMs = 2000);
+
+    // Opens brain.db at `dbPath` read-only on a uniquely named connection of
+    // the calling thread, runs `readFn` inside one read transaction (rolled
+    // back: a consistent snapshot) and removes the connection. Never creates
+    // the file. Returns false (and `*pError`) if it could not be opened.
+    static bool withReadOnlyConnection(const QString& dbPath,
+            int busyTimeoutMs,
+            const std::function<void(const QSqlDatabase&)>& readFn,
+            QString* pError);
+    static QSet<QString> tableNames(const QSqlDatabase& db, QString* pError);
+    static QSet<QString> columnNames(const QSqlDatabase& db, const QString& table);
 
     // Same rule as GridCorrector::normalizedLocation and brain's
     // store.indexdb.location_key: '\' -> '/', QString::toLower().

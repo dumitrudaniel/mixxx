@@ -1360,9 +1360,11 @@ add_library(
   src/library/djapp/braindbreader.cpp
   src/library/djapp/djappanalysis.cpp
   src/library/djapp/djappfeature.cpp
+  src/library/djapp/djappsuggestions.cpp
   src/library/djapp/djappui.cpp
   src/library/djapp/dlgdjappanalysis.cpp
   src/library/djapp/dlgdjappplaceholder.cpp
+  src/library/djapp/dlgdjappsuggestions.cpp
   src/library/tabledelegates/defaultdelegate.cpp
   src/library/dlgcoverartfullsize.cpp
   src/library/dlgcoverartfullsize.ui
@@ -2720,6 +2722,7 @@ if(BUILD_TESTING)
     src/test/automixvocalguard_test.cpp
     src/test/gridcorrector_test.cpp
     src/test/djappbraindbreader_test.cpp
+    src/test/djappsuggestions_test.cpp
     src/test/basetrackcache_test.cpp
     src/test/basetracktablemodel_test.cpp
     src/test/beatgridtest.cpp

@@ -425,21 +425,20 @@ QString BrainDbReader::locationKey(const QString& location) {
 }
 
 // static
-BrainSnapshot BrainDbReader::read(const QString& dbPath, int busyTimeoutMs) {
-    BrainSnapshot snapshot;
-    snapshot.dbPath = dbPath;
-    snapshot.readAt = QDateTime::currentDateTime();
+bool BrainDbReader::withReadOnlyConnection(const QString& dbPath,
+        int busyTimeoutMs,
+        const std::function<void(const QSqlDatabase&)>& readFn,
+        QString* pError) {
     if (dbPath.isEmpty()) {
-        snapshot.error = QStringLiteral("[DJApp],BrainDb nu e setat în mixxx.cfg");
-        return snapshot;
+        *pError = QStringLiteral("[DJApp],BrainDb nu e setat în mixxx.cfg");
+        return false;
     }
     if (!QFileInfo::exists(dbPath)) {
         // QSQLITE_OPEN_READONLY would refuse it anyway; never create one.
-        snapshot.error = QStringLiteral("brain.db nu există: %1").arg(dbPath);
-        return snapshot;
+        *pError = QStringLiteral("brain.db nu există: %1").arg(dbPath);
+        return false;
     }
-    QElapsedTimer timer;
-    timer.start();
+    bool opened = false;
     const QString connectionName = QStringLiteral("djapp_braindb_reader_%1")
                                            .arg(s_connectionCounter.fetchAndAddRelaxed(1));
     {
@@ -448,12 +447,13 @@ BrainSnapshot BrainDbReader::read(const QString& dbPath, int busyTimeoutMs) {
         db.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=%1")
                                      .arg(qMax(0, busyTimeoutMs)));
         if (!db.open()) {
-            snapshot.error = db.lastError().text();
+            *pError = db.lastError().text();
         } else {
+            opened = true;
             // One deferred (read) transaction: every table from the same
             // snapshot, even while brain commits. Never writes; rolled back.
             const bool inTransaction = db.transaction();
-            readAll(db, &snapshot);
+            readFn(db);
             if (inTransaction) {
                 db.rollback();
             }
@@ -461,6 +461,33 @@ BrainSnapshot BrainDbReader::read(const QString& dbPath, int busyTimeoutMs) {
         }
     }
     QSqlDatabase::removeDatabase(connectionName);
+    return opened;
+}
+
+// static
+QSet<QString> BrainDbReader::tableNames(const QSqlDatabase& db, QString* pError) {
+    return tablesOf(db, pError);
+}
+
+// static
+QSet<QString> BrainDbReader::columnNames(const QSqlDatabase& db, const QString& table) {
+    return columnsOf(db, table);
+}
+
+// static
+BrainSnapshot BrainDbReader::read(const QString& dbPath, int busyTimeoutMs) {
+    BrainSnapshot snapshot;
+    snapshot.dbPath = dbPath;
+    snapshot.readAt = QDateTime::currentDateTime();
+    QElapsedTimer timer;
+    timer.start();
+    withReadOnlyConnection(
+            dbPath,
+            busyTimeoutMs,
+            [&snapshot](const QSqlDatabase& db) {
+                readAll(db, &snapshot);
+            },
+            &snapshot.error);
     snapshot.readMs = timer.elapsed();
     if (!snapshot.ok) {
         qWarning() << "DJ App: cannot read brain.db" << dbPath << snapshot.error;
