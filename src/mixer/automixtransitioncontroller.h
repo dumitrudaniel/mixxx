@@ -5,12 +5,14 @@
 #include <QObject>
 #include <QSharedPointer>
 #include <QTimer>
+#include <optional>
 #include <vector>
 
 #include "control/controlobject.h"
 #include "control/controlproxy.h"
 #include "control/controlpushbutton.h"
 #include "mixer/automixrecipe.h"
+#include "mixer/automixvocalguard.h"
 #include "preferences/usersettings.h"
 #include "track/track_decl.h"
 #include "util/class.h"
@@ -44,6 +46,11 @@ class VisualPlayPosition;
 //  4. Touching an automated knob hands THAT knob back (per-lane manual
 //     takeover); the others keep going. "Reia auto" glides every manual lane
 //     back onto its curve.
+//  5. Vocal guard (mixer/automixvocalguard.h): with two stem tracks that both
+//     have a real voice in brain.db's vocal maps, the vocals stem volume of
+//     each deck is an extra lane (multiplying the recipe's stem_vocals lane,
+//     if any): the old voice finishes its phrase, then the new one comes in.
+//     Switched per transition by [AutomixTransition],vocal_guard.
 //
 // Never touched: crossfader, channel faders (unless a recipe enables a
 // volume lane), sync. Hardcoded to [Channel1]/[Channel2] because the
@@ -122,6 +129,8 @@ class AutomixTransitionController : public QObject {
         double glideFrom = 0.0;
         double glideStartBeat = 0.0;
         double glideBeats = 0.0;
+        // Vocals stem lane scaled by the vocal guard gain of lane.deck.
+        bool vocalGuard = false;
     };
 
     void onTrigger(int fromDeckNumber, double value);
@@ -135,6 +144,19 @@ class AutomixTransitionController : public QObject {
     void reloadRecipesIfChanged();
     void writeLanes();
     bool tracksChanged() const;
+    // Lane value at `beat`, vocal guard gain included.
+    double laneTarget(const LaneRuntime& runtime, double beat) const;
+
+    // Arm time: vocal maps of both tracks from brain.db (read-only).
+    void loadVocalMaps();
+    // Start time: decides whether the guard runs and plans it. Returns why it
+    // is off (empty = on).
+    QString planVocalGuard();
+    // A transition cancelled by a track change must not leave a voice muted
+    // on a deck that keeps playing: guard lanes go back to their curve value
+    // without the guard gain (decks with a new track are left alone, Mixxx
+    // resets their stems on load).
+    void releaseVocalGuard();
 
     // Outgoing deck position in beats from its grid anchor (Mixxx's first
     // downbeat = beat 0), fractional. False if there is no track, beatgrid
@@ -179,6 +201,10 @@ class AutomixTransitionController : public QObject {
     // [AutomixTransition],recipe: selector slot (AutomixRecipeBook::selectorIds()),
     // persisted, cycled by the skin button.
     ControlPushButton m_recipeSelector;
+    // [AutomixTransition],vocal_guard: 1 = guard on ("GARDA VOCE", default),
+    // 0 = voices may overlap ("VOCE LIBERA"). Persisted, read when a
+    // transition starts.
+    ControlPushButton m_vocalGuardToggle;
 
     QTimer m_tickTimer;
     QTimer m_longPressTimer;
@@ -195,10 +221,18 @@ class AutomixTransitionController : public QObject {
     double m_startGridBeat = 0.0;
     double m_lastGridBeat = 0.0;
     double m_transitionBeat = 0.0;
+    // Recipe length, stretched if the vocal guard needs longer (only a
+    // recipe shorter than four guard fades).
+    double m_runLengthBeats = 0.0;
     bool m_incomingNeedsPlay = false;
     TrackPointer m_pOutgoingTrack;
     TrackPointer m_pIncomingTrack;
     std::vector<LaneRuntime> m_lanes;
+    QString m_brainDbPath;
+    std::optional<AutomixVocalMap> m_outgoingVocalMap;
+    std::optional<AutomixVocalMap> m_incomingVocalMap;
+    bool m_vocalGuardActive = false;
+    AutomixVocalGuardPlan m_vocalGuardPlan;
 
     DISALLOW_COPY_AND_ASSIGN(AutomixTransitionController);
 };

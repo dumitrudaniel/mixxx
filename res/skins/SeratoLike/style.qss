@@ -1108,6 +1108,23 @@ WLibrarySidebar {
   border: 1px solid #ff6b66;
 }
 
+/* Garda de voce: 1 = GARDA VOCE (aprins, ca selectorul de reteta),
+   0 = VOCE LIBERA (stins, vocile se pot suprapune). */
+#AutomixVocalGuardButton {
+  background-color: #2b2b2b;
+  color: #6a6a6a;
+  border: 1px solid #444444;
+  border-radius: 2px;
+}
+#AutomixVocalGuardButton[displayValue="1"] {
+  color: #ff8800;
+  font-weight: bold;
+  border: 1px solid #ff8800;
+}
+#AutomixVocalGuardButton:pressed {
+  background-color: #3a3a3a;
+}
+
 /* Mixxx 2.6 stems (ADR 0020): randul de sub transport. Mute = rosu. */
 #StemMuteButton {
   background-color: #2b2b2b;

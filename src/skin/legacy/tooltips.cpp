@@ -648,6 +648,17 @@ void Tooltips::addStandardTooltips() {
             << tr("Aprins = ai preluat manual cel putin un knob in tranzitie. "
                   "Click: knob-urile preluate revin lin pe curba retetei.");
 
+    add("automix_vocal_guard")
+            << tr("Garda voce")
+            << tr("GARDA VOCE (aprins): vocea piesei vechi isi termina fraza, "
+                  "se stinge, apoi intra vocea piesei noi. Daca fraza tine mai "
+                  "mult de jumatate din tranzitie, e taiata acolo si vocile se "
+                  "predau direct. VOCE LIBERA (stins): vocile se pot "
+                  "suprapune, ca la un DJ care se joaca cu stems. Merge doar pe "
+                  "piese cu stems si cu harta de voce in brain; piesele "
+                  "instrumentale nu sunt atinse. Se citeste la pornirea "
+                  "tranzitiei. Atingi knob-ul VOCE = il preiei manual.");
+
     add("mute")
             << tr("Mute")
             << tr("Mutes the selected channel's audio in the main output.");

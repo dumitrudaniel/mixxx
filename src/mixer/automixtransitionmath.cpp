@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "track/beats.h"
+
 namespace {
 // Avoid relying on M_PI (not guaranteed defined on MSVC without
 // _USE_MATH_DEFINES).
@@ -54,6 +56,30 @@ double AutomixTransitionMath::nextStartBeat(
         return boundary;
     }
     return boundary + quantumBeats;
+}
+
+// static
+std::optional<double> AutomixTransitionMath::gridBeatAt(
+        const mixxx::Beats& beats, mixxx::audio::FramePos position) {
+    if (!position.isValid()) {
+        return std::nullopt;
+    }
+    auto next = beats.iteratorFrom(position); // first beat at or after position
+    if (next == beats.cend() || next == beats.cbegin()) {
+        return std::nullopt;
+    }
+    auto prev = next;
+    if (*next > position) {
+        --prev;
+    } else {
+        ++next;
+    }
+    const double beatLength = *next - *prev;
+    if (beatLength <= 0.0) {
+        return std::nullopt;
+    }
+    const int index = prev - beats.cfirstmarker();
+    return index + (position - *prev) / beatLength;
 }
 
 // static

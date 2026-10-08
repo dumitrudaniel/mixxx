@@ -15,6 +15,10 @@
 namespace {
 const QString kEngineGroup = QStringLiteral("[AutomixTransition]");
 const QString kRecipeFileName = QStringLiteral("automix_recipes.json");
+// [DJApp],BrainDb in mixxx.cfg: path to brain.db (docs/decisions/0019).
+const QString kDJAppGroup = QStringLiteral("[DJApp]");
+// The vocal guard needs NI stem files: drums, bass, other, vocals.
+constexpr double kGuardedStemCount = 4.0;
 
 // 50 Hz: a one-beat bass swap at 105 BPM lasts ~0.57 s, i.e. ~28 steps.
 constexpr int kTickIntervalMs = 20;
@@ -121,12 +125,16 @@ AutomixTransitionController::AutomixTransitionController(
           m_resume(ConfigKey(kEngineGroup, QStringLiteral("resume"))),
           m_recipeSelector(ConfigKey(kEngineGroup, QStringLiteral("recipe")),
                   true,
-                  AutomixRecipeBook::kDefaultSelectorIndex) {
+                  AutomixRecipeBook::kDefaultSelectorIndex),
+          m_vocalGuardToggle(ConfigKey(kEngineGroup, QStringLiteral("vocal_guard")),
+                  true,
+                  1.0) {
     // Mixxx 2.6: ButtonMode moved from ControlPushButton::TOGGLE to the
     // mixxx::control::ButtonMode enum class; setBehavior() applies both in
     // one step so the behavior is rebuilt only once.
     m_recipeSelector.setBehavior(mixxx::control::ButtonMode::Toggle,
             static_cast<int>(AutomixRecipeBook::selectorIds().size()));
+    m_vocalGuardToggle.setButtonMode(mixxx::control::ButtonMode::Toggle);
 
     connect(&m_triggerToDeck2,
             &ControlPushButton::valueChanged,
@@ -309,6 +317,8 @@ void AutomixTransitionController::arm(int fromDeckNumber) {
         }
     }
 
+    loadVocalMaps();
+
     m_armGridBeat = gridBeat;
     m_startGridBeat = AutomixTransitionMath::nextStartBeat(gridBeat,
             m_book.armQuantumBars() * AutomixTransitionMath::kBeatsPerBar,
@@ -339,6 +349,156 @@ void AutomixTransitionController::disarm() {
     m_fromDeckNumber = 0;
     m_pOutgoingTrack.reset();
     m_pIncomingTrack.reset();
+    m_outgoingVocalMap.reset();
+    m_incomingVocalMap.reset();
+}
+
+void AutomixTransitionController::loadVocalMaps() {
+    m_outgoingVocalMap.reset();
+    m_incomingVocalMap.reset();
+    m_brainDbPath = m_pConfig->getValueString(ConfigKey(kDJAppGroup, QStringLiteral("BrainDb")));
+    // Without stems on both decks the guard cannot run: skip the lookup.
+    if (!m_recipe.vocalGuard.enabled || m_brainDbPath.isEmpty() ||
+            outgoingDeck().stemCount.get() != kGuardedStemCount ||
+            incomingDeck().stemCount.get() != kGuardedStemCount) {
+        return;
+    }
+    m_outgoingVocalMap = AutomixVocalMapStore::lookup(
+            m_brainDbPath, m_pOutgoingTrack->getLocation());
+    m_incomingVocalMap = AutomixVocalMapStore::lookup(
+            m_brainDbPath, m_pIncomingTrack->getLocation());
+}
+
+QString AutomixTransitionController::planVocalGuard() {
+    m_vocalGuardActive = false;
+    if (!m_recipe.vocalGuard.enabled) {
+        return QStringLiteral("recipe has vocal_guard off");
+    }
+    if (!m_vocalGuardToggle.toBool()) {
+        return QStringLiteral("switched off on the skin (VOCE LIBERA)");
+    }
+    DeckControls& outgoing = outgoingDeck();
+    DeckControls& incoming = incomingDeck();
+    if (outgoing.stemCount.get() != kGuardedStemCount) {
+        return QStringLiteral("outgoing track is not a stem file (stem_count %1)")
+                .arg(outgoing.stemCount.get());
+    }
+    if (incoming.stemCount.get() != kGuardedStemCount) {
+        return QStringLiteral("incoming track is not a stem file (stem_count %1)")
+                .arg(incoming.stemCount.get());
+    }
+    if (m_brainDbPath.isEmpty()) {
+        return QStringLiteral("[DJApp],BrainDb is not set");
+    }
+    if (!QFileInfo::exists(m_brainDbPath)) {
+        return QStringLiteral("brain.db not found at ") + m_brainDbPath;
+    }
+    if (!m_outgoingVocalMap) {
+        return QStringLiteral("no vocal map in brain.db for the outgoing track ") +
+                m_pOutgoingTrack->getLocation();
+    }
+    if (!m_incomingVocalMap) {
+        return QStringLiteral("no vocal map in brain.db for the incoming track ") +
+                m_pIncomingTrack->getLocation();
+    }
+    // An instrumental's "vocals" stem carries the lead melody: never guard it.
+    if (!m_outgoingVocalMap->hasVocals) {
+        return QStringLiteral("outgoing track is instrumental (has_vocals 0)");
+    }
+    if (!m_incomingVocalMap->hasVocals) {
+        return QStringLiteral("incoming track is instrumental (has_vocals 0)");
+    }
+    const mixxx::BeatsPointer pOutgoingBeats = m_pOutgoingTrack->getBeats();
+    if (!pOutgoingBeats) {
+        return QStringLiteral("outgoing track has no beatgrid");
+    }
+
+    // Outgoing: the transition clock runs on its grid, beat 0 = start bar.
+    const std::vector<AutomixVocalBlock> outgoingBlocks =
+            AutomixVocalGuardPlanner::toTransitionBeats(
+                    AutomixVocalGuardPlanner::secondsToGridBeats(
+                            *pOutgoingBeats, m_outgoingVocalMap->segmentsSec),
+                    m_startGridBeat,
+                    0.0);
+
+    // Incoming: its grid beat now (at its cue if stopped) is where it will be
+    // when it plays from transition beat `incomingStart` on (now if already
+    // playing, else when this transition presses play), then it advances
+    // outgoingBpm / incomingBpm transition beats per beat of its own (1 when
+    // tempo matched). Only feeds the "comes in mid phrase" note: the guard's
+    // timing depends on the outgoing voice alone.
+    std::vector<AutomixVocalBlock> incomingBlocks;
+    bool incomingPlaced = false;
+    double incomingGridBeat = 0.0;
+    const mixxx::BeatsPointer pIncomingBeats = m_pIncomingTrack->getBeats();
+    if (pIncomingBeats && readGridBeat(incoming, &incomingGridBeat)) {
+        const double incomingStart = m_incomingNeedsPlay
+                ? std::max(m_transitionBeat, m_recipe.incomingPlayAtBeat)
+                : m_transitionBeat;
+        const double outgoingBpm = outgoing.bpm.get();
+        const double incomingBpm = incoming.bpm.get();
+        const double beatRatio =
+                outgoingBpm > 0.0 && incomingBpm > 0.0 ? outgoingBpm / incomingBpm : 1.0;
+        incomingBlocks = AutomixVocalGuardPlanner::toTransitionBeats(
+                AutomixVocalGuardPlanner::secondsToGridBeats(
+                        *pIncomingBeats, m_incomingVocalMap->segmentsSec),
+                incomingGridBeat,
+                incomingStart,
+                beatRatio);
+        incomingPlaced = true;
+    }
+
+    // The outgoing voice hands over by the recipe's bass/high swap at the
+    // latest, even mid phrase (see AutomixVocalGuardPlanner::latestHandoverBeats).
+    m_vocalGuardPlan = AutomixVocalGuardPlanner::plan(outgoingBlocks,
+            incomingBlocks,
+            m_recipe.vocalGuard.maxWaitBeats,
+            m_recipe.vocalGuard.fadeBeats,
+            AutomixVocalGuardPlanner::latestHandoverBeats(m_recipe.lengthBeats));
+    m_vocalGuardActive = true;
+    // Handover at half the length at the latest: the guard only outlasts a
+    // recipe shorter than four fades (2 bars with the default 2-beat fade).
+    m_runLengthBeats = std::max(m_recipe.lengthBeats, m_vocalGuardPlan.endBeat());
+
+    const auto beats = [](double value) {
+        return QString::number(value, 'f', 2);
+    };
+    QString outgoingNote;
+    if (m_vocalGuardPlan.cutMidPhrase) {
+        outgoingNote = QStringLiteral("phrase cut, max wait ") +
+                beats(m_recipe.vocalGuard.maxWaitBeats) +
+                QStringLiteral(", latest handover ") +
+                beats(AutomixVocalGuardPlanner::latestHandoverBeats(m_recipe.lengthBeats));
+    } else if (m_vocalGuardPlan.outgoingFadeStart > 0.0) {
+        outgoingNote = QStringLiteral("after its phrase");
+    } else {
+        outgoingNote = QStringLiteral("not singing at start");
+    }
+    QString incomingNote;
+    if (!incomingPlaced) {
+        incomingNote = QStringLiteral("incoming position unknown");
+    } else if (m_vocalGuardPlan.incomingMidPhrase) {
+        incomingNote = QStringLiteral("incoming enters mid phrase");
+    } else {
+        incomingNote = QStringLiteral("incoming enters between phrases");
+    }
+    QString notes = incomingNote;
+    if (m_outgoingVocalMap->viaStemExport || m_incomingVocalMap->viaStemExport) {
+        notes += QStringLiteral(", stem file uses its original's map");
+    }
+    if (m_runLengthBeats > m_recipe.lengthBeats) {
+        notes += QStringLiteral(", transition stretched to ") + beats(m_runLengthBeats) +
+                QStringLiteral(" beats");
+    }
+    qInfo().noquote() << QStringLiteral("Automix: vocal guard on: outgoing voice fades out at "
+                                        "beat %1 (%2), incoming voice fades in at beat %3, "
+                                        "fades of %4 beats (%5)")
+                                 .arg(beats(m_vocalGuardPlan.outgoingFadeStart),
+                                         outgoingNote,
+                                         beats(m_vocalGuardPlan.incomingFadeStart),
+                                         beats(m_vocalGuardPlan.fadeBeats),
+                                         notes);
+    return QString();
 }
 
 void AutomixTransitionController::start() {
@@ -349,16 +509,47 @@ void AutomixTransitionController::start() {
 
     DeckControls& outgoing = outgoingDeck();
     DeckControls& incoming = incomingDeck();
+    m_runLengthBeats = m_recipe.lengthBeats;
+    const QString guardOffReason = planVocalGuard();
+    if (!guardOffReason.isEmpty()) {
+        qInfo().noquote() << "Automix: vocal guard off:" << guardOffReason;
+    }
+
     m_lanes.clear();
-    m_lanes.reserve(m_recipe.lanes.size());
-    for (const AutomixLane& lane : m_recipe.lanes) {
+    m_lanes.reserve(m_recipe.lanes.size() + 2);
+    const auto addLane = [this, &outgoing, &incoming](const AutomixLane& lane) {
         LaneRuntime runtime;
         runtime.lane = lane;
         runtime.pControl = (lane.deck == AutomixDeckRole::Outgoing ? outgoing : incoming)
                                    .control(lane.param);
+        // Read now, never remembered from an earlier track: Mixxx 2.6 resets
+        // stem volumes on track load (stem_auto_reset).
         runtime.startValue = runtime.pControl->get();
         runtime.lastWritten = runtime.startValue;
+        runtime.vocalGuard = m_vocalGuardActive && lane.param == AutomixParam::StemVocals;
         m_lanes.push_back(std::move(runtime));
+    };
+    bool outgoingVocalsLane = false;
+    bool incomingVocalsLane = false;
+    for (const AutomixLane& lane : m_recipe.lanes) {
+        addLane(lane);
+        if (lane.param == AutomixParam::StemVocals) {
+            (lane.deck == AutomixDeckRole::Outgoing ? outgoingVocalsLane : incomingVocalsLane) =
+                    true;
+        }
+    }
+    if (m_vocalGuardActive) {
+        // Implicit vocals stem lanes: flat at the knob's start value, scaled
+        // by the guard. A recipe stem_vocals lane is scaled instead.
+        for (const AutomixDeckRole role : {AutomixDeckRole::Outgoing, AutomixDeckRole::Incoming}) {
+            if (role == AutomixDeckRole::Outgoing ? outgoingVocalsLane : incomingVocalsLane) {
+                continue;
+            }
+            AutomixLane lane;
+            lane.deck = role;
+            lane.param = AutomixParam::StemVocals;
+            addLane(lane);
+        }
     }
     qInfo() << "Automix: start" << m_recipe.id << "at transition beat" << m_transitionBeat;
     writeLanes();
@@ -381,7 +572,7 @@ void AutomixTransitionController::writeLanes() {
             anyManual = true;
             continue;
         }
-        double value = runtime.lane.valueAt(m_transitionBeat, runtime.startValue);
+        double value = laneTarget(runtime, m_transitionBeat);
         if (runtime.gliding) {
             const double t = runtime.glideBeats > 0.0
                     ? (m_transitionBeat - runtime.glideStartBeat) / runtime.glideBeats
@@ -399,6 +590,32 @@ void AutomixTransitionController::writeLanes() {
         runtime.lastWritten = value;
     }
     m_manual.set(anyManual ? 1.0 : 0.0);
+}
+
+double AutomixTransitionController::laneTarget(const LaneRuntime& runtime, double beat) const {
+    double value = runtime.lane.valueAt(beat, runtime.startValue);
+    if (runtime.vocalGuard) {
+        value *= runtime.lane.deck == AutomixDeckRole::Outgoing
+                ? m_vocalGuardPlan.outgoingGain(beat)
+                : m_vocalGuardPlan.incomingGain(beat);
+    }
+    return value;
+}
+
+void AutomixTransitionController::releaseVocalGuard() {
+    for (LaneRuntime& runtime : m_lanes) {
+        if (!runtime.vocalGuard || runtime.manual ||
+                diverged(runtime.pControl->get(), runtime.lastWritten)) {
+            continue;
+        }
+        const bool outgoingRole = runtime.lane.deck == AutomixDeckRole::Outgoing;
+        const DeckControls& deck = outgoingRole ? outgoingDeck() : incomingDeck();
+        if (PlayerInfo::instance().getTrackInfo(deck.group) !=
+                (outgoingRole ? m_pOutgoingTrack : m_pIncomingTrack)) {
+            continue;
+        }
+        runtime.pControl->set(runtime.lane.valueAt(m_transitionBeat, runtime.startValue));
+    }
 }
 
 void AutomixTransitionController::slotResume(double value) {
@@ -446,23 +663,11 @@ bool AutomixTransitionController::readGridBeat(DeckControls& deck, double* pBeat
     // buffer, unlike playposition which is throttled to 15 Hz).
     const double fraction = deck.pVisualPlayPos->getEnginePlayPos();
     const auto position = mixxx::audio::FramePos::fromEngineSamplePos(fraction * trackSamples);
-
-    auto next = pBeats->iteratorFrom(position); // first beat at or after position
-    if (next == pBeats->cend() || next == pBeats->cbegin()) {
+    const std::optional<double> beat = AutomixTransitionMath::gridBeatAt(*pBeats, position);
+    if (!beat) {
         return false;
     }
-    auto prev = next;
-    if (*next > position) {
-        --prev;
-    } else {
-        ++next;
-    }
-    const double beatLength = *next - *prev;
-    if (beatLength <= 0.0) {
-        return false;
-    }
-    const int index = prev - pBeats->cfirstmarker();
-    *pBeat = index + (position - *prev) / beatLength;
+    *pBeat = *beat;
     return true;
 }
 
@@ -477,6 +682,7 @@ void AutomixTransitionController::slotTick() {
         if (m_state == State::Armed) {
             disarm();
         } else {
+            releaseVocalGuard();
             abort();
         }
         return;
@@ -525,7 +731,7 @@ void AutomixTransitionController::slotTick() {
         m_incomingNeedsPlay = false;
     }
     writeLanes();
-    m_countdown.set(std::ceil(std::max(0.0, m_recipe.lengthBeats - m_transitionBeat) /
+    m_countdown.set(std::ceil(std::max(0.0, m_runLengthBeats - m_transitionBeat) /
             AutomixTransitionMath::kBeatsPerBar));
 
     bool anyAutomated = false;
@@ -534,7 +740,7 @@ void AutomixTransitionController::slotTick() {
         anyAutomated = anyAutomated || !runtime.manual;
         anyGliding = anyGliding || runtime.gliding;
     }
-    if ((m_transitionBeat >= m_recipe.lengthBeats && !anyGliding) || !anyAutomated) {
+    if ((m_transitionBeat >= m_runLengthBeats && !anyGliding) || !anyAutomated) {
         finish();
     }
 }
@@ -546,7 +752,7 @@ void AutomixTransitionController::finish() {
         if (runtime.manual || diverged(runtime.pControl->get(), runtime.lastWritten)) {
             continue;
         }
-        runtime.pControl->set(runtime.lane.valueAt(m_recipe.lengthBeats, runtime.startValue));
+        runtime.pControl->set(laneTarget(runtime, m_runLengthBeats));
     }
     if (m_incomingNeedsPlay) {
         incomingDeck().play.set(1.0);
@@ -569,6 +775,9 @@ void AutomixTransitionController::abort() {
     m_incomingNeedsPlay = false;
     m_pOutgoingTrack.reset();
     m_pIncomingTrack.reset();
+    m_outgoingVocalMap.reset();
+    m_incomingVocalMap.reset();
+    m_vocalGuardActive = false;
 }
 
 void AutomixTransitionController::refuse(int fromDeckNumber, ButtonState reason) {

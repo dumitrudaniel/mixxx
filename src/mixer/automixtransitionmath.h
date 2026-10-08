@@ -1,5 +1,13 @@
 #pragma once
 
+#include <optional>
+
+#include "audio/frame.h"
+
+namespace mixxx {
+class Beats;
+} // namespace mixxx
+
 // Pure, engine-independent math for the automix transition engine
 // (Faza 1.5, rebuilt as Etapa 0 of docs/plan-automix-v2.md, 2026-10-06).
 //
@@ -63,6 +71,14 @@ class AutomixTransitionMath {
     // otherwise the next boundary is used. Works for negative beats (before
     // the anchor). Returns `beat` unchanged if quantumBeats <= 0.
     static double nextStartBeat(double beat, double quantumBeats, double graceBeats);
+
+    // Fractional beat index of `position` on `beats`, counted from
+    // cfirstmarker() (Mixxx's grid anchor, "first downbeat" = beat 0); the
+    // fraction comes from the previous and the next beat. This is the beat
+    // the transition clock runs on, and the vocal guard converts vocal
+    // phrases with it. nullopt if the position is invalid or off the grid.
+    static std::optional<double> gridBeatAt(
+            const mixxx::Beats& beats, mixxx::audio::FramePos position);
 
     // How far the transition clock advances this tick, in beats.
     //
