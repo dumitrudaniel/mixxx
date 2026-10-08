@@ -10,6 +10,7 @@
 #include "library/library.h"
 #include "library/trackcollectionmanager.h"
 #include "mixer/automixtransitioncontroller.h"
+#include "mixer/gridcorrector.h"
 #include "mixer/auxiliary.h"
 #include "mixer/deck.h"
 #include "mixer/microphone.h"
@@ -117,7 +118,8 @@ PlayerManager::PlayerManager(UserSettingsPointer pConfig,
           m_pCONumAuxiliaries(std::make_unique<ControlObject>(
                   ConfigKey(kAppGroup, QStringLiteral("num_auxiliaries")), true, true)),
           m_pTrackAnalysisScheduler(TrackAnalysisScheduler::NullPointer()),
-          m_pAutomixTransitionController(nullptr) {
+          m_pAutomixTransitionController(nullptr),
+          m_pGridCorrector(new GridCorrector(pConfig, this)) {
     m_pCONumDecks->addAlias(ConfigKey(kLegacyGroup, QStringLiteral("num_decks")));
     m_pCONumDecks->connectValueChangeRequest(this,
             &PlayerManager::slotChangeNumDecks, Qt::DirectConnection);
@@ -365,6 +367,7 @@ void PlayerManager::addDeckInner() {
                 this,
                 &PlayerManager::slotAnalyzeTrack);
     }
+    m_pGridCorrector->watchPlayer(pDeck);
 
     m_players[handleGroup.handle()] = pDeck;
     m_decks.append(pDeck);
