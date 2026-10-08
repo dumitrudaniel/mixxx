@@ -101,6 +101,14 @@ class AutomixTransitionController : public QObject {
         // never starts a loop.
         ControlProxy loopEnabled;
         ControlProxy reloopToggle;
+        // Mixxx 2.6 stems (docs/decisions/0020): [ChannelN_StemM],volume,
+        // linear gain 0..1, applied before the deck EQ. stem_count is 0 for a
+        // normal track (then the stem volumes are no-ops).
+        ControlProxy stemDrums;
+        ControlProxy stemBass;
+        ControlProxy stemOther;
+        ControlProxy stemVocals;
+        ControlProxy stemCount;
         QSharedPointer<VisualPlayPosition> pVisualPlayPos;
     };
 

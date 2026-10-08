@@ -59,6 +59,8 @@
 
               <Template src="skins:SeratoLike/decks/row_5_transportLoopJump_compact.xml" />
 
+              <Template src="skins:SeratoLike/decks/row_6_stems.xml" />
+
             </Children>
           </WidgetGroup><!-- DeckRows2345 -->
 

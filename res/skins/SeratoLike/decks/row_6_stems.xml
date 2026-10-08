@@ -1,0 +1,35 @@
+<!--
+Description:
+  Randul de stems al unui deck (Mixxx 2.6, docs/decisions/0020). Vizibil doar
+  cand piesa incarcata are stems ([ChannelN],stem_count > 0).
+-->
+<Template>
+  <WidgetGroup>
+    <ObjectName>StemRow</ObjectName>
+    <Layout>horizontal</Layout>
+    <SizePolicy>me,min</SizePolicy>
+    <Children>
+      <Template src="skins:SeratoLike/decks/stem_control.xml">
+        <SetVariable name="StemNum">1</SetVariable>
+        <SetVariable name="StemText">TOBE</SetVariable>
+      </Template>
+      <Template src="skins:SeratoLike/decks/stem_control.xml">
+        <SetVariable name="StemNum">2</SetVariable>
+        <SetVariable name="StemText">BAS</SetVariable>
+      </Template>
+      <Template src="skins:SeratoLike/decks/stem_control.xml">
+        <SetVariable name="StemNum">3</SetVariable>
+        <SetVariable name="StemText">ALTE</SetVariable>
+      </Template>
+      <Template src="skins:SeratoLike/decks/stem_control.xml">
+        <SetVariable name="StemNum">4</SetVariable>
+        <SetVariable name="StemText">VOCE</SetVariable>
+      </Template>
+      <WidgetGroup><Size>0me,0min</Size></WidgetGroup>
+    </Children>
+    <Connection>
+      <ConfigKey>[Channel<Variable name="ChanNum"/>],stem_count</ConfigKey>
+      <BindProperty>visible</BindProperty>
+    </Connection>
+  </WidgetGroup>
+</Template>

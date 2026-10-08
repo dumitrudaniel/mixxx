@@ -30,6 +30,23 @@ enum class AutomixParam {
     EqHigh,
     Filter,
     Volume,
+    // Mixxx 2.6 stems, file (NI) order: [ChannelN_Stem1..4],volume = drums,
+    // bass, other, vocals (docs/decisions/0020). No-ops on non-stem tracks.
+    StemDrums,
+    StemBass,
+    StemOther,
+    StemVocals,
+};
+
+// "Astept fraza" (Dan's practice, docs/decisions/0020): the outgoing voice
+// finishes the phrase it is singing when the transition starts, then fades in
+// fadeBeats; the incoming voice stays muted until then and fades in after.
+// The outgoing phrase is cut anyway after maxWaitBeats. Needs stem tracks and
+// a vocal map from brain.db; otherwise the recipe runs on the EQs alone.
+struct AutomixVocalGuard {
+    bool enabled = true;
+    double maxWaitBeats = 32.0;
+    double fadeBeats = 2.0;
 };
 
 struct AutomixPoint {
@@ -75,6 +92,7 @@ struct AutomixRecipe {
     std::vector<AutomixPreset> prepareIncoming;
     // Enabled lanes only; lanes with "enabled": false are validated, then dropped.
     std::vector<AutomixLane> lanes;
+    AutomixVocalGuard vocalGuard;
 };
 
 class AutomixRecipeBook {

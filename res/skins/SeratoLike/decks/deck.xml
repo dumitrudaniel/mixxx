@@ -13,10 +13,11 @@
   invizibil - aia a fost un dublu-cratima ilegal intr-un comentariu XML din
   channel_left.xml care stricea tot parsing-ul template-ului (vezi ADR 0008
   addendum). Pastrat oricum ca buget sanatos acum ca butonul chiar ocupa
-  spatiu real. -->
+  spatiu real. 200->224 (2026-10-08, Mixxx 2.6): randul de stems de sub
+  transport (decks/row_6_stems.xml, ADR 0020), vizibil doar pe piese cu stems. -->
   <WidgetGroup>
     <Layout>vertical</Layout>
-    <MaximumSize>,200</MaximumSize>
+    <MaximumSize>,224</MaximumSize>
     <Children>
 
       <Template src="skins:SeratoLike/decks/deck_singletons.xml">

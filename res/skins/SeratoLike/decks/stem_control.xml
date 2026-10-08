@@ -1,0 +1,55 @@
+<!--
+Description:
+  Un stem (Mixxx 2.6): buton mute cu numele stem-ului + volumul lui.
+  docs/decisions/0020. Ordinea stems-urilor e cea din fisier (NI): 1 tobe,
+  2 bas, 3 alte instrumente, 4 voce.
+Variables:
+  ChanNum  : numarul deck-ului
+  StemNum  : 1..4
+  StemText : eticheta butonului
+-->
+<Template>
+  <SetVariable name="StemGroup">[Channel<Variable name="ChanNum"/>_Stem<Variable name="StemNum"/>]</SetVariable>
+  <SetVariable name="KnobBg">regular</SetVariable>
+  <SetVariable name="KnobIndicator">regular</SetVariable>
+  <SetVariable name="ArcRadius"><Variable name="ArcRadiusSmall"/></SetVariable>
+  <SetVariable name="ArcThickness"><Variable name="ArcThicknessBig"/></SetVariable>
+  <WidgetGroup>
+    <ObjectName>StemControl</ObjectName>
+    <Layout>horizontal</Layout>
+    <SizePolicy>min,min</SizePolicy>
+    <Children>
+      <PushButton>
+        <TooltipId>StemMuteButton</TooltipId>
+        <ObjectName>StemMuteButton</ObjectName>
+        <Size>40f,20f</Size>
+        <NumberStates>2</NumberStates>
+        <State>
+          <Number>0</Number>
+          <Text><Variable name="StemText"/></Text>
+          <Alignment>center</Alignment>
+        </State>
+        <State>
+          <Number>1</Number>
+          <Text><Variable name="StemText"/></Text>
+          <Alignment>center</Alignment>
+        </State>
+        <Connection>
+          <ConfigKey><Variable name="StemGroup"/>,mute</ConfigKey>
+          <ButtonState>LeftButton</ButtonState>
+        </Connection>
+      </PushButton>
+      <Template src="skins:SeratoLike/controls/knob.xml">
+        <SetVariable name="TooltipId">StemVolumeKnob</SetVariable>
+        <SetVariable name="ObjectName">StemVolumeKnob</SetVariable>
+        <SetVariable name="Size">24f,22f</SetVariable>
+        <SetVariable name="KnobColor">orange</SetVariable>
+        <SetVariable name="ArcColor"><Variable name="ArcColorGain"/></SetVariable>
+        <SetVariable name="ArcUnipolar">true</SetVariable>
+        <SetVariable name="Group"><Variable name="StemGroup"/></SetVariable>
+        <SetVariable name="Control">volume</SetVariable>
+      </Template>
+      <WidgetGroup><Size>6f,0min</Size></WidgetGroup>
+    </Children>
+  </WidgetGroup>
+</Template>

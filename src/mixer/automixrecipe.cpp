@@ -185,9 +185,50 @@ bool parseParam(const QString& text, AutomixParam* pParam) {
         *pParam = AutomixParam::Filter;
     } else if (text == QLatin1String("volume")) {
         *pParam = AutomixParam::Volume;
+    } else if (text == QLatin1String("stem_drums")) {
+        *pParam = AutomixParam::StemDrums;
+    } else if (text == QLatin1String("stem_bass")) {
+        *pParam = AutomixParam::StemBass;
+    } else if (text == QLatin1String("stem_other")) {
+        *pParam = AutomixParam::StemOther;
+    } else if (text == QLatin1String("stem_vocals")) {
+        *pParam = AutomixParam::StemVocals;
     } else {
         return false;
     }
+    return true;
+}
+
+// "vocal_guard": absent = on with defaults (Dan's practice); {"mode": "off"}
+// switches it off. Mirrors brain/automix/recipes.py.
+bool parseVocalGuard(const QJsonValue& json, AutomixVocalGuard* pGuard, QString* pError) {
+    *pGuard = AutomixVocalGuard();
+    if (json.isUndefined() || json.isNull()) {
+        return true;
+    }
+    if (!json.isObject()) {
+        *pError = QStringLiteral("vocal_guard must be an object");
+        return false;
+    }
+    const QJsonObject object = json.toObject();
+    const QString mode = object.value(QStringLiteral("mode")).toString(
+            QStringLiteral("wait_phrase"));
+    if (mode == QLatin1String("off")) {
+        pGuard->enabled = false;
+        return true;
+    }
+    if (mode != QLatin1String("wait_phrase")) {
+        *pError = QStringLiteral("vocal_guard: unknown mode \"%1\"").arg(mode);
+        return false;
+    }
+    const double maxWaitBars = object.value(QStringLiteral("max_wait_bars")).toDouble(8.0);
+    const double fadeBeats = object.value(QStringLiteral("fade_beats")).toDouble(2.0);
+    if (maxWaitBars <= 0.0 || fadeBeats < 0.0) {
+        *pError = QStringLiteral("vocal_guard: max_wait_bars must be > 0 and fade_beats >= 0");
+        return false;
+    }
+    pGuard->maxWaitBeats = maxWaitBars * AutomixTransitionMath::kBeatsPerBar;
+    pGuard->fadeBeats = fadeBeats;
     return true;
 }
 
@@ -216,6 +257,10 @@ double maxValueForParam(AutomixParam param) {
         return 4.0; // Mixxx EQ knob range is [0, 4] (+12 dB).
     case AutomixParam::Filter:
     case AutomixParam::Volume:
+    case AutomixParam::StemDrums:
+    case AutomixParam::StemBass:
+    case AutomixParam::StemOther:
+    case AutomixParam::StemVocals:
         return 1.0;
     }
     return 1.0;
@@ -383,6 +428,12 @@ bool parseRecipe(const QJsonObject& json, AutomixRecipe* pRecipe, QString* pErro
             return false;
         }
         pRecipe->prepareIncoming.push_back(preset);
+    }
+
+    if (!parseVocalGuard(json.value(QStringLiteral("vocal_guard")),
+                &pRecipe->vocalGuard,
+                pError)) {
+        return false;
     }
 
     pRecipe->lanes.clear();

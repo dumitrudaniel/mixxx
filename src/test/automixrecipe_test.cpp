@@ -244,3 +244,53 @@ TEST_F(AutomixRecipeTest, SelectorFallsBackToBuiltinRecipes) {
     // Out of range -> default slot.
     EXPECT_EQ(QStringLiteral("standard8"), book.forSelectorIndex(42)->id);
 }
+
+TEST_F(AutomixRecipeTest, StemLanesAndVocalGuardParse) {
+    AutomixRecipeBook book;
+    QString error;
+    ASSERT_TRUE(AutomixRecipeBook::parse(recipeFile(R"(
+        {"deck": "outgoing", "param": "stem_vocals", "points": [
+            {"bar": 0, "value": "current"}, {"bar": 1, "value": "kill", "shape": "cos"}]},
+        {"deck": "incoming", "param": "stem_drums", "points": [
+            {"bar": 0, "value": 0.5}]})",
+                                                    R"("vocal_guard": {"max_wait_bars": 4, "fade_beats": 1},)"),
+            &book,
+            &error))
+            << error.toStdString();
+    const AutomixRecipe& r = *book.find(QStringLiteral("t"));
+    ASSERT_EQ(2u, r.lanes.size());
+    EXPECT_EQ(AutomixParam::StemVocals, r.lanes[0].param);
+    EXPECT_EQ(AutomixParam::StemDrums, r.lanes[1].param);
+    EXPECT_TRUE(r.vocalGuard.enabled);
+    EXPECT_DOUBLE_EQ(16.0, r.vocalGuard.maxWaitBeats);
+    EXPECT_DOUBLE_EQ(1.0, r.vocalGuard.fadeBeats);
+}
+
+TEST_F(AutomixRecipeTest, VocalGuardDefaultsOnAndCanBeSwitchedOff) {
+    const AutomixRecipe& standard = *AutomixRecipeBook::builtin().find(QStringLiteral("standard8"));
+    EXPECT_TRUE(standard.vocalGuard.enabled);
+    EXPECT_DOUBLE_EQ(32.0, standard.vocalGuard.maxWaitBeats);
+
+    AutomixRecipeBook book;
+    QString error;
+    ASSERT_TRUE(AutomixRecipeBook::parse(
+            recipeFile("", R"("vocal_guard": {"mode": "off"},)"), &book, &error))
+            << error.toStdString();
+    EXPECT_FALSE(book.find(QStringLiteral("t"))->vocalGuard.enabled);
+
+    for (const char* bad : {R"("vocal_guard": {"mode": "maybe"},)",
+                 R"("vocal_guard": {"max_wait_bars": 0},)",
+                 R"("vocal_guard": 3,)"}) {
+        AutomixRecipeBook untouched = AutomixRecipeBook::builtin();
+        EXPECT_FALSE(AutomixRecipeBook::parse(recipeFile("", bad), &untouched, &error)) << bad;
+    }
+}
+
+TEST_F(AutomixRecipeTest, StemValuesAreCappedAtUnity) {
+    AutomixRecipeBook book;
+    QString error;
+    EXPECT_FALSE(AutomixRecipeBook::parse(recipeFile(R"(
+        {"deck": "incoming", "param": "stem_vocals", "points": [{"bar": 0, "value": 2}]})"),
+            &book,
+            &error));
+}

@@ -1107,3 +1107,17 @@ WLibrarySidebar {
   font-weight: bold;
   border: 1px solid #ff6b66;
 }
+
+/* Mixxx 2.6 stems (ADR 0020): randul de sub transport. Mute = rosu. */
+#StemMuteButton {
+  background-color: #2b2b2b;
+  color: #d0d0d0;
+  font-weight: bold;
+  border: 1px solid #555555;
+  border-radius: 2px;
+}
+#StemMuteButton[displayValue="1"] {
+  background-color: #e0302a;
+  color: #ffffff;
+  border: 1px solid #ff6b66;
+}

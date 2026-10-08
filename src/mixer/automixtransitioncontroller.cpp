@@ -38,6 +38,10 @@ bool diverged(double a, double b) {
 double stateValue(AutomixTransitionController::ButtonState state) {
     return static_cast<double>(static_cast<int>(state));
 }
+// "[Channel1]" + 4 -> "[Channel1_Stem4]" (Mixxx 2.6 stem groups, file order).
+QString stemGroup(const QString& deckGroup, int stemNumber) {
+    return deckGroup.left(deckGroup.size() - 1) + QStringLiteral("_Stem%1]").arg(stemNumber);
+}
 } // namespace
 
 AutomixTransitionController::DeckControls::DeckControls(const QString& group)
@@ -60,6 +64,11 @@ AutomixTransitionController::DeckControls::DeckControls(const QString& group)
                   QStringLiteral("super1")),
           loopEnabled(group, QStringLiteral("loop_enabled")),
           reloopToggle(group, QStringLiteral("reloop_toggle")),
+          stemDrums(stemGroup(group, 1), QStringLiteral("volume")),
+          stemBass(stemGroup(group, 2), QStringLiteral("volume")),
+          stemOther(stemGroup(group, 3), QStringLiteral("volume")),
+          stemVocals(stemGroup(group, 4), QStringLiteral("volume")),
+          stemCount(group, QStringLiteral("stem_count")),
           // Created by the deck's EngineBuffer, which exists before this
           // controller (PlayerManager builds it after the second deck).
           pVisualPlayPos(VisualPlayPosition::getVisualPlayPosition(group)) {
@@ -77,6 +86,14 @@ ControlProxy* AutomixTransitionController::DeckControls::control(AutomixParam pa
         return &filter;
     case AutomixParam::Volume:
         return &volume;
+    case AutomixParam::StemDrums:
+        return &stemDrums;
+    case AutomixParam::StemBass:
+        return &stemBass;
+    case AutomixParam::StemOther:
+        return &stemOther;
+    case AutomixParam::StemVocals:
+        return &stemVocals;
     }
     return &eqMid;
 }
