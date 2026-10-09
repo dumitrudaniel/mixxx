@@ -116,7 +116,10 @@ class DJAppAutopilot : public QObject {
     void showCandidates(int playingDeckNumber, int otherDeckNumber);
     // Loads `candidate` onto otherDeckNumber right away -- the shared path
     // for both a Dan click and the deadline's default pick.
-    void loadCandidate(int playingDeckNumber, int otherDeckNumber, const Candidate& candidate);
+    // By value: chooseCandidate() passes m_candidates.at(index), and this
+    // clears m_candidates (resetCandidates()) before it is done reading the
+    // candidate's fields -- a reference would dangle at that point.
+    void loadCandidate(int playingDeckNumber, int otherDeckNumber, Candidate candidate);
 
     void pickAndLoad(int playingDeckNumber, int otherDeckNumber);
     void triggerMix(int playingDeckNumber);

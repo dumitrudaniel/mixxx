@@ -1,10 +1,10 @@
 #include "library/djapp/djappautopilot.h"
 
 #include <QDateTime>
+#include <QDir>
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
-#include <QtConcurrentRun>
 #include <QtDebug>
 
 #include "library/djapp/braindbreader.h"
@@ -17,8 +17,6 @@
 #include "mixer/playermanager.h"
 #include "moc_djappautopilot.cpp"
 #include "track/track.h"
-#include "util/db/dbconnectionpooled.h"
-#include "util/db/dbconnectionpooler.h"
 
 using namespace djapp::autopilot;
 
@@ -212,27 +210,38 @@ struct LibraryPoolRead {
     QStringList playedToday;
 };
 
-// Mixxx's db connection pool hands out one connection per calling thread; the
-// main/UI thread doesn't get one here (same reason DlgDJAppAnalysis::refresh
-// reads via QtConcurrent::run, "like the external library features do" -
-// without it mixxxDb.isOpen() is false and every suggestion looks outside
-// the pool, so the autopilot silently finds nothing to load).
-LibraryPoolRead readLibraryPool(mixxx::DbConnectionPoolPtr pPool) {
+// mixxx::DbConnectionPool hands out ONE connection per calling thread by a
+// fixed name ("MIXXX-1" for the main thread); a second attempt on a thread
+// that already holds one is refused ("Thread-local database connection
+// already exists") and, worse, left Qt's SQL layer in a state that crashed
+// soon after (confirmed live: a click on a candidate, on the main thread,
+// that already owns the pool's main-thread connection elsewhere in Mixxx).
+// Read mixxxdb.sqlite the same safe way BrainDbReader reads brain.db
+// instead: our own short-lived, uniquely named, read-only connection that
+// never touches Mixxx's own pool or its thread-affinity rules.
+LibraryPoolRead readLibraryPool(const UserSettingsPointer& pConfig) {
     LibraryPoolRead out;
-    const mixxx::DbConnectionPooler pooler(pPool);
-    const QSqlDatabase mixxxDb = mixxx::DbConnectionPooled(pPool);
-    if (!mixxxDb.isOpen()) {
-        return out;
-    }
-    QString libraryError;
-    const QList<DJAppLibraryTrack> tracks = DJAppAnalysis::readLibraryTracks(mixxxDb, &libraryError);
-    for (const DJAppLibraryTrack& t : tracks) {
-        out.poolLocations << t.location;
-        out.libraryByKey.insert(BrainDbReader::locationKey(t.location), t);
-    }
-    QString playedError;
-    const QDateTime dayStart = DJAppSuggestions::djDayStart(QDateTime::currentDateTime());
-    out.playedToday = DJAppSuggestions::readPlayedSince(mixxxDb, dayStart.toUTC(), &playedError);
+    const QString dbPath =
+            QDir(pConfig->getSettingsPath()).filePath(QStringLiteral("mixxxdb.sqlite"));
+    QString error;
+    BrainDbReader::withReadOnlyConnection(
+            dbPath,
+            2000,
+            [&](const QSqlDatabase& mixxxDb) {
+                QString libraryError;
+                const QList<DJAppLibraryTrack> tracks =
+                        DJAppAnalysis::readLibraryTracks(mixxxDb, &libraryError);
+                for (const DJAppLibraryTrack& t : tracks) {
+                    out.poolLocations << t.location;
+                    out.libraryByKey.insert(BrainDbReader::locationKey(t.location), t);
+                }
+                QString playedError;
+                const QDateTime dayStart =
+                        DJAppSuggestions::djDayStart(QDateTime::currentDateTime());
+                out.playedToday = DJAppSuggestions::readPlayedSince(
+                        mixxxDb, dayStart.toUTC(), &playedError);
+            },
+            &error);
     return out;
 }
 } // namespace
@@ -265,7 +274,7 @@ QList<DJAppAutopilot::Candidate> DJAppAutopilot::queryCandidates(
     // continuation, and it only runs inside the lookahead window / at the
     // deadline, not every tick.
     const LibraryPoolRead pool =
-            QtConcurrent::run(&readLibraryPool, m_pLibrary->dbConnectionPool()).result();
+            readLibraryPool(m_pConfig);
     const QHash<QString, DJAppLibraryTrack>& libraryByKey = pool.libraryByKey;
     const QStringList& playedToday = pool.playedToday;
 
@@ -333,7 +342,7 @@ QList<DJAppAutopilot::Candidate> DJAppAutopilot::queryCandidates(
 }
 
 void DJAppAutopilot::loadCandidate(
-        int playingDeckNumber, int otherDeckNumber, const Candidate& candidate) {
+        int playingDeckNumber, int otherDeckNumber, Candidate candidate) {
     m_awaitingLoadDeck = otherDeckNumber;
     if (m_overrideEmptyDeck == otherDeckNumber) {
         m_overrideEmptyDeck = 0;
