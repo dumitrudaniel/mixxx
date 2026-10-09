@@ -146,7 +146,13 @@ QString statusText(const Status& status) {
     case StatusKind::Armed:
         return QStringLiteral("tranziție armată · pornește pe bara următoare");
     case StatusKind::Running:
-        return QStringLiteral("în tranziție");
+        // trackText carries the guards' live state here (Dan, 2026-10-09:
+        // "garda de ton si voce nu par sa faca ceva" - was only ever
+        // logged, invisible while DJing), e.g. "GARDĂ VOCE activă · GARDĂ
+        // TON inactivă"; empty when neither guard applies to this recipe.
+        return status.trackText.isEmpty()
+                ? QStringLiteral("în tranziție")
+                : QStringLiteral("în tranziție · %1").arg(status.trackText);
     }
     return QStringLiteral("oprit");
 }

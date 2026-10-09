@@ -122,11 +122,20 @@ void DlgDJAppAutomix::rebuildCandidates(const QList<DJAppAutopilotCandidate>& ca
                     m_pCandidatesSection));
             shownRiskySeparator = true;
         }
-        const QString text = QStringLiteral("%1  ·  %2  ·  %3 BPM  ·  %4")
+        // Dan, 2026-10-09: flag when this pair's recipe_hint is fade_curat -
+        // the autopilot will switch off his selected beatmatched recipe for
+        // just this one transition (tempo step too big or an unreliable
+        // grid), same as if he'd picked a different recipe row himself.
+        const QString recipeFlag = candidate.recipeHint == QLatin1String("fade_curat")
+                ? QStringLiteral("  ·  ⚠ %1")
+                          .arg(DJAppSuggestions::recipeText(candidate.recipeHint))
+                : QString();
+        const QString text = QStringLiteral("%1  ·  %2  ·  %3 BPM  ·  %4%5")
                                       .arg(candidate.label,
                                               DJAppSuggestions::scoreText(candidate.score),
                                               DJAppSuggestions::stepText(candidate.stepBpm),
-                                              candidate.keyVerdict);
+                                              candidate.keyVerdict,
+                                              recipeFlag);
         auto* pButton = new QPushButton(text, m_pCandidatesSection);
         pButton->setFlat(true);
         pButton->setStyleSheet(QStringLiteral("text-align: left; padding: 3px 6px;"));

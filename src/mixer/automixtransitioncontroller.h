@@ -310,6 +310,13 @@ class AutomixTransitionController : public QObject {
     AutomixVocalGuardPlan m_vocalGuardPlan;
     bool m_keyGuardActive = false;
     AutomixKeyGuardPlan m_keyGuardPlan;
+    // [AutomixTransition],vocal_guard_active / key_guard_active (Dan,
+    // 2026-10-09): "nu par sa faca ceva" - the guards' on/off state was only
+    // ever logged (qInfo "vocal guard off: <reason>"), invisible while
+    // DJing. Set in start(), right after planVocalGuard()/planKeyGuard(),
+    // reset to 0 in disarm() and when a run ends.
+    ControlObject m_vocalGuardActiveStatus;
+    ControlObject m_keyGuardActiveStatus;
     // meet_return during the transition (empty = no tempo lanes).
     std::optional<AutomixTempoPlan> m_tempoPlan;
     TempoLane m_outgoingTempo;

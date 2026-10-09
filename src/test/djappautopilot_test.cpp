@@ -239,6 +239,18 @@ TEST(DJAppAutopilotLogicTest, StatusTextIsRomanianAndReadable) {
     const QString choosing = statusText(Status{StatusKind::Choosing, 2, 125.0, QString()});
     EXPECT_TRUE(choosing.contains(QStringLiteral("deck 2")));
     EXPECT_TRUE(choosing.contains(QStringLiteral("2:05")));
+
+    // Dan, 2026-10-09: "garda de ton si voce nu par sa faca ceva" - the
+    // Running status line now carries the guards' live state (trackText is
+    // repurposed for this one case), not just a bare "în tranziție".
+    EXPECT_EQ(statusText(Status{StatusKind::Running, 0, 0.0, QString()}),
+            QStringLiteral("în tranziție"));
+    const QString runningWithGuards = statusText(Status{StatusKind::Running,
+            0,
+            0.0,
+            QStringLiteral("GARDĂ VOCE activă · GARDĂ TON inactivă")});
+    EXPECT_TRUE(runningWithGuards.contains(QStringLiteral("GARDĂ VOCE activă")));
+    EXPECT_TRUE(runningWithGuards.contains(QStringLiteral("GARDĂ TON inactivă")));
 }
 
 } // namespace

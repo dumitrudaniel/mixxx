@@ -52,6 +52,10 @@ DJAppAutopilot::DJAppAutopilot(UserSettingsPointer pConfig, Library* pLibrary, Q
                   QStringLiteral("[Channel1]"), QStringLiteral("automix_transition_to_2"))),
           m_triggerToDeck1(ConfigKey(
                   QStringLiteral("[Channel2]"), QStringLiteral("automix_transition_to_1"))),
+          m_vocalGuardActiveStatus(ConfigKey(QStringLiteral("[AutomixTransition]"),
+                  QStringLiteral("vocal_guard_active"))),
+          m_keyGuardActiveStatus(ConfigKey(QStringLiteral("[AutomixTransition]"),
+                  QStringLiteral("key_guard_active"))),
           m_deck1(QStringLiteral("[Channel1]")),
           m_deck2(QStringLiteral("[Channel2]")) {
     m_enabled.setButtonMode(mixxx::control::ButtonMode::Toggle);
@@ -196,13 +200,45 @@ void DJAppAutopilot::resetCandidates() {
 
 void DJAppAutopilot::triggerMix(int playingDeckNumber) {
     ControlProxy* pTrigger = playingDeckNumber == 1 ? &m_triggerToDeck2 : &m_triggerToDeck1;
+
+    // Dan, 2026-10-09: brain.db's pair_scores.recipe_hint can differ from
+    // whatever Dan left [AutomixTransition],recipe on - "fade_curat" when
+    // this specific pair's tempo step is too big or either grid is
+    // unreliable for a beatmatched mix. Flip the selector for this one
+    // press only, the same as Dan manually choosing a different recipe row
+    // right before pressing MIX himself, then restore his own choice
+    // immediately after. arm() reads the selector synchronously inside
+    // pTrigger->set(1.0) (no event-loop turn in between), so no tick can
+    // land on the temporary value.
+    const int originalRecipeIndex = static_cast<int>(m_recipeSelector.get());
+    int overrideIndex = -1;
+    if (!m_pickedRecipeHint.isEmpty()) {
+        overrideIndex = AutomixRecipeBook::selectorIds().indexOf(m_pickedRecipeHint);
+        if (overrideIndex < 0) {
+            qWarning() << "DJ App autopilot: unknown recipe_hint" << m_pickedRecipeHint
+                       << "- keeping Dan's own recipe selection";
+        }
+    }
+    const bool overriding = overrideIndex >= 0 && overrideIndex != originalRecipeIndex;
+    if (overriding) {
+        qInfo() << "DJ App autopilot: using recipe" << m_pickedRecipeHint
+                 << "for this transition (brain.db recipe_hint); Dan's own selection ("
+                 << AutomixRecipeBook::selectorIds().value(originalRecipeIndex)
+                 << ") resumes right after";
+        m_recipeSelector.set(overrideIndex);
+    }
     // Same effect as a button tap: press, then release.
     pTrigger->set(1.0);
     pTrigger->set(0.0);
+    if (overriding) {
+        m_recipeSelector.set(originalRecipeIndex);
+    }
+
     m_overrideEmptyDeck = 0;
     m_awaitingLoadDeck = 0;
     m_pickedLabel.clear();
     m_pickedRisky = false;
+    m_pickedRecipeHint.clear();
     resetCandidates();
 }
 
@@ -254,7 +290,8 @@ QList<DJAppAutopilotCandidate> DJAppAutopilot::toDisplayList(const QList<Candida
     QList<DJAppAutopilotCandidate> out;
     out.reserve(candidates.size());
     for (const Candidate& c : candidates) {
-        out.append(DJAppAutopilotCandidate{c.label, c.score, c.stepBpm, c.keyVerdict, c.allowed});
+        out.append(DJAppAutopilotCandidate{
+                c.label, c.score, c.stepBpm, c.keyVerdict, c.allowed, c.recipeHint});
     }
     return out;
 }
@@ -328,6 +365,7 @@ QList<DJAppAutopilot::Candidate> DJAppAutopilot::queryCandidates(
         c.stepBpm = suggestion.stepBpm;
         c.keyVerdict = DJAppSuggestions::keyText(result.sourceCamelot, suggestion);
         c.allowed = allowed;
+        c.recipeHint = suggestion.recipeHint;
         return c;
     };
 
@@ -356,6 +394,7 @@ void DJAppAutopilot::loadCandidate(
             << (candidate.allowed ? "(allowed)" : "(risky fallback)");
     m_pickedLabel = candidate.label;
     m_pickedRisky = !candidate.allowed;
+    m_pickedRecipeHint = candidate.recipeHint;
     // The picker list stays up (Dan: "nu vreau sa dispara lista, poate ma
     // razgandesc") - he may click a different row before the deadline,
     // which just reloads the free deck with that one instead. It clears
@@ -375,26 +414,42 @@ void DJAppAutopilot::showCandidates(int playingDeckNumber, int otherDeckNumber) 
     const bool sameTarget = m_candidatesQueried &&
             m_candidatesSourceLocation == sourceLocation &&
             m_candidatesOtherDeck == otherDeckNumber;
-    if (!sameTarget) {
-        // The risky-fallback flag matters for the deadline's silent default
-        // pick (pickAndLoad); the picker shows allowed vs. risky per row
-        // instead (DJAppAutopilotCandidate::allowed), so it is not needed here.
-        m_candidates = queryCandidates(playingDeckNumber, otherDeckNumber, nullptr);
-        m_candidatesSourceLocation = sourceLocation;
-        m_candidatesPlayingDeck = playingDeckNumber;
-        m_candidatesOtherDeck = otherDeckNumber;
-        m_candidatesQueried = true;
-        emit candidatesChanged(toDisplayList(m_candidates));
+    if (sameTarget) {
+        // Nothing new to do: either the auto-load below already fired for
+        // this cycle (m_awaitingLoadDeck guards tick() from calling back in
+        // here before that lands), or this is the true dead end and there
+        // is nothing to retry without a new track on either deck.
+        if (m_candidates.isEmpty()) {
+            setStatus(Status{StatusKind::Picking, playingDeckNumber, 0.0, QString()});
+        }
+        return;
     }
+    // The risky-fallback flag matters for the deadline's silent default
+    // pick (pickAndLoad); the picker shows allowed vs. risky per row
+    // instead (DJAppAutopilotCandidate::allowed), so it is not needed here.
+    m_candidates = queryCandidates(playingDeckNumber, otherDeckNumber, nullptr);
+    m_candidatesSourceLocation = sourceLocation;
+    m_candidatesPlayingDeck = playingDeckNumber;
+    m_candidatesOtherDeck = otherDeckNumber;
+    m_candidatesQueried = true;
+    emit candidatesChanged(toDisplayList(m_candidates));
     if (m_candidates.isEmpty()) {
         // Allowed AND risky both empty: the one true dead end (change 1).
         setStatus(Status{StatusKind::Picking, playingDeckNumber, 0.0, QString()});
         return;
     }
-    setStatus(Status{StatusKind::Choosing,
-            playingDeckNumber,
-            m_cachedMixOutSec[playingDeckNumber - 1].value_or(0.0),
-            QString()});
+    // Dan, 2026-10-09: "intra prea devreme/iese prea tarziu, depaseste" -
+    // waiting for the deadline to load a track (pickAndLoad) put the actual
+    // track-load latency right on the critical path to the trigger, on top
+    // of the engine's own bar-quantized start. Load the top candidate the
+    // moment the picker opens instead, same as if Dan clicked row 0 himself
+    // right away: by the deadline the track is long since loaded, decide()
+    // goes straight to Action::Trigger, and there is only one load path
+    // left to reason about (change 4: "nu alege mereu prima optiune"). Dan
+    // can still click a different row any time before the deadline
+    // (chooseCandidate reloads the free deck); clicking is just an earlier,
+    // explicit version of the same load this already does implicitly.
+    loadCandidate(playingDeckNumber, otherDeckNumber, m_candidates.first());
 }
 
 void DJAppAutopilot::pickAndLoad(int playingDeckNumber, int otherDeckNumber) {
@@ -437,6 +492,7 @@ void DJAppAutopilot::tick() {
         resetCandidates();
         m_pickedLabel.clear();
         m_pickedRisky = false;
+        m_pickedRecipeHint.clear();
         setStatus(Status{StatusKind::Off, 0, 0.0, QString()});
         return;
     }
@@ -445,7 +501,14 @@ void DJAppAutopilot::tick() {
         return;
     }
     if (engineState == 2) {
-        setStatus(Status{StatusKind::Running, 0, 0.0, QString()});
+        const QString guardsText = QStringLiteral("GARDĂ VOCE %1 · GARDĂ TON %2")
+                                            .arg(m_vocalGuardActiveStatus.toBool()
+                                                            ? QStringLiteral("activă")
+                                                            : QStringLiteral("inactivă"),
+                                                    m_keyGuardActiveStatus.toBool()
+                                                            ? QStringLiteral("activă")
+                                                            : QStringLiteral("inactivă"));
+        setStatus(Status{StatusKind::Running, 0, 0.0, guardsText});
         return;
     }
 
@@ -489,6 +552,7 @@ void DJAppAutopilot::tick() {
             resetCandidates();
             m_pickedLabel.clear();
             m_pickedRisky = false;
+            m_pickedRecipeHint.clear();
             setStatus(Status{StatusKind::Watching, playingDeck, mixOutSec.value(), QString()});
         } else if (!m_pickedLabel.isEmpty()) {
             // Inside the lookahead window, other deck already spoken for by

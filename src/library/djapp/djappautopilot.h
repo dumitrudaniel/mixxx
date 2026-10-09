@@ -24,6 +24,12 @@ struct DJAppAutopilotCandidate {
     double stepBpm = 0.0;
     QString keyVerdict;
     bool allowed = false; // false = risky (change 1/3: flagged, not hidden)
+    // brain.db's pair_scores.recipe_hint for this specific pair (Dan,
+    // 2026-10-09): "fade_curat" when the tempo step is too big or either
+    // grid is unreliable for a beatmatched mix, otherwise the set's own
+    // recipe id. Shown so Dan can see when a transition will NOT use his
+    // currently selected recipe.
+    QString recipeHint;
 };
 
 // DJ App automix autopilot (docs/plan-ui-integrare.md §6 Etapa 5, cut down
@@ -100,6 +106,7 @@ class DJAppAutopilot : public QObject {
         double stepBpm = 0.0;
         QString keyVerdict;
         bool allowed = false;
+        QString recipeHint; // brain.db's pair_scores.recipe_hint for this pair
     };
     static QList<DJAppAutopilotCandidate> toDisplayList(const QList<Candidate>& candidates);
 
@@ -138,6 +145,12 @@ class DJAppAutopilot : public QObject {
     ControlProxy m_recipeSelector; // [AutomixTransition],recipe
     ControlProxy m_triggerToDeck2; // [Channel1],automix_transition_to_2
     ControlProxy m_triggerToDeck1; // [Channel2],automix_transition_to_1
+    // Dan, 2026-10-09: "garda de ton si voce nu par sa faca ceva" - these
+    // were only ever logged (qInfo), invisible while DJing. Read during
+    // StatusKind::Running so the status line says whether each guard is
+    // actually protecting this transition.
+    ControlProxy m_vocalGuardActiveStatus; // [AutomixTransition],vocal_guard_active
+    ControlProxy m_keyGuardActiveStatus; // [AutomixTransition],key_guard_active
 
     DeckProxies m_deck1;
     DeckProxies m_deck2;
@@ -167,6 +180,11 @@ class DJAppAutopilot : public QObject {
     // resetCandidates().
     QString m_pickedLabel;
     bool m_pickedRisky = false;
+    // The picked candidate's recipe_hint (Dan, 2026-10-09): triggerMix()
+    // flips [AutomixTransition],recipe to this for the one press, then
+    // restores Dan's own selection right after - same as him manually
+    // picking a different recipe row before pressing MIX himself.
+    QString m_pickedRecipeHint;
 
     DISALLOW_COPY_AND_ASSIGN(DJAppAutopilot);
 };

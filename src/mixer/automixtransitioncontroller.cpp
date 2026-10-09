@@ -163,7 +163,9 @@ AutomixTransitionController::AutomixTransitionController(
                   1.0),
           m_keyGuardToggle(ConfigKey(kEngineGroup, QStringLiteral("key_guard")),
                   true,
-                  1.0) {
+                  1.0),
+          m_vocalGuardActiveStatus(ConfigKey(kEngineGroup, QStringLiteral("vocal_guard_active"))),
+          m_keyGuardActiveStatus(ConfigKey(kEngineGroup, QStringLiteral("key_guard_active"))) {
     // Mixxx 2.6: ButtonMode moved from ControlPushButton::TOGGLE to the
     // mixxx::control::ButtonMode enum class; setBehavior() applies both in
     // one step so the behavior is rebuilt only once.
@@ -393,6 +395,8 @@ void AutomixTransitionController::disarm() {
     m_pIncomingTrack.reset();
     m_outgoingVocalMap.reset();
     m_incomingVocalMap.reset();
+    m_vocalGuardActiveStatus.set(0.0);
+    m_keyGuardActiveStatus.set(0.0);
 }
 
 void AutomixTransitionController::loadVocalMaps() {
@@ -624,10 +628,12 @@ void AutomixTransitionController::start() {
     if (!guardOffReason.isEmpty()) {
         qInfo().noquote() << "Automix: vocal guard off:" << guardOffReason;
     }
+    m_vocalGuardActiveStatus.set(m_vocalGuardActive ? 1.0 : 0.0);
     const QString keyGuardOffReason = planKeyGuard();
     if (!keyGuardOffReason.isEmpty()) {
         qInfo().noquote() << "Automix: key guard off:" << keyGuardOffReason;
     }
+    m_keyGuardActiveStatus.set(m_keyGuardActive ? 1.0 : 0.0);
     planTempo();
 
     m_lanes.clear();
@@ -1175,6 +1181,8 @@ void AutomixTransitionController::abort() {
     m_incomingVocalMap.reset();
     m_vocalGuardActive = false;
     m_keyGuardActive = false;
+    m_vocalGuardActiveStatus.set(0.0);
+    m_keyGuardActiveStatus.set(0.0);
 }
 
 void AutomixTransitionController::refuse(int fromDeckNumber, ButtonState reason) {
