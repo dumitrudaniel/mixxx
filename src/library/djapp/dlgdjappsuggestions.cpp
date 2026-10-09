@@ -2,11 +2,13 @@
 
 #include <QCheckBox>
 #include <QColor>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLocale>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QTableView>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -195,28 +197,51 @@ DlgDJAppSuggestions::DlgDJAppSuggestions(
           m_pRiskyModel(new DJAppSuggestionsTableModel(this)) {
     djappui::setupView(this);
 
-    auto* pLayout = new QVBoxLayout(this);
+    // Laptop-screen fix (Dan reported this view "unusable due to poorly
+    // sized space" on the DJ laptop, 1366x768-1600x900 class): the content
+    // below (2 tables + header/filter/labels/2 rows of action buttons)
+    // easily exceeds a short library panel's available height. Previously
+    // this content sat directly in `this`'s layout with no way to shrink
+    // further than its widgets' combined minimum size -- on a short panel
+    // it simply got clipped, not scrolled. A QScrollArea makes the overflow
+    // (if any) scrollable instead of invisible, on any screen size, while
+    // changing nothing about the content itself on a tall-enough screen
+    // (QScrollArea is otherwise invisible: no border, resizable widget).
+    auto* pOuterLayout = new QVBoxLayout(this);
+    pOuterLayout->setContentsMargins(0, 0, 0, 0);
+    pOuterLayout->setSpacing(0);
+
+    auto* pScrollArea = new QScrollArea(this);
+    pScrollArea->setWidgetResizable(true);
+    pScrollArea->setFrameShape(QFrame::NoFrame);
+    pScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    pOuterLayout->addWidget(pScrollArea);
+
+    auto* pContent = new QWidget(pScrollArea);
+    pScrollArea->setWidget(pContent);
+
+    auto* pLayout = new QVBoxLayout(pContent);
     pLayout->setContentsMargins(8, 6, 8, 6);
     pLayout->setSpacing(6);
 
     auto* pHeader = new QHBoxLayout();
-    m_pSourceLabel = djappui::newTitle(QStringLiteral("Sugestii după: —"), this);
+    m_pSourceLabel = djappui::newTitle(QStringLiteral("Sugestii după: —"), pContent);
     pHeader->addWidget(m_pSourceLabel, 1);
-    m_pRefreshButton = new QPushButton(QStringLiteral("Reîmprospătează"), this);
+    m_pRefreshButton = new QPushButton(QStringLiteral("Reîmprospătează"), pContent);
     connect(m_pRefreshButton, &QPushButton::clicked, this, &DlgDJAppSuggestions::refresh);
     pHeader->addWidget(m_pRefreshButton);
     pLayout->addLayout(pHeader);
 
-    m_pStatusLabel = djappui::newMutedLabel(QString(), this);
+    m_pStatusLabel = djappui::newMutedLabel(QString(), pContent);
     pLayout->addWidget(m_pStatusLabel);
 
-    m_pIndexBanner = djappui::newWorkInProgressBanner(QString(), this);
+    m_pIndexBanner = djappui::newWorkInProgressBanner(QString(), pContent);
     m_pIndexBanner->hide();
     pLayout->addWidget(m_pIndexBanner);
 
     auto* pFilterRow = new QHBoxLayout();
     m_pOnlyMatchingKeysCheck =
-            new QCheckBox(QStringLiteral("doar tonalități potrivite"), this);
+            new QCheckBox(QStringLiteral("doar tonalități potrivite"), pContent);
     connect(m_pOnlyMatchingKeysCheck,
             &QCheckBox::toggled,
             this,
@@ -225,32 +250,46 @@ DlgDJAppSuggestions::DlgDJAppSuggestions(
     pFilterRow->addStretch(1);
     pLayout->addLayout(pFilterRow);
 
-    m_pAllowedView = newSuggestionTable(m_pAllowedModel, this);
+    m_pAllowedView = newSuggestionTable(m_pAllowedModel, pContent);
     pLayout->addWidget(m_pAllowedView, 3);
 
     m_pRiskyLabel = djappui::newMutedLabel(
-            QStringLiteral("── riscante (tonalitate) ──────────────────────"), this);
+            QStringLiteral("── riscante (tonalitate) ──────────────────────"), pContent);
     pLayout->addWidget(m_pRiskyLabel);
-    m_pRiskyView = newSuggestionTable(m_pRiskyModel, this);
+    m_pRiskyView = newSuggestionTable(m_pRiskyModel, pContent);
     pLayout->addWidget(m_pRiskyView, 2);
 
-    m_pWhyLabel = djappui::newMutedLabel(QString(), this);
+    m_pWhyLabel = djappui::newMutedLabel(QString(), pContent);
     m_pWhyLabel->hide();
     pLayout->addWidget(m_pWhyLabel);
 
-    auto* pActions = new QHBoxLayout();
-    m_pLoadButton = new QPushButton(QStringLiteral("Încarcă pe deck-ul liber"), this);
-    m_pPreviewButton = new QPushButton(QStringLiteral("Preascultă"), this);
-    m_pAddButton = new QPushButton(QStringLiteral("Adaugă după curentă"), this);
-    m_pNotNowButton = new QPushButton(QStringLiteral("Nu acum"), this);
-    m_pWhyButton = new QPushButton(QStringLiteral("De ce?"), this);
-    for (QPushButton* pButton : {m_pLoadButton, m_pPreviewButton, m_pAddButton, m_pNotNowButton,
-                 m_pWhyButton}) {
+    // Two rows instead of one (was a single QHBoxLayout with all 5 buttons
+    // plus a trailing stretch): at a modest laptop width, 5 Romanian-length
+    // button labels in one row ("Încarcă pe deck-ul liber", "Adaugă după
+    // curentă", ...) summed to more than the panel's available width, and a
+    // QHBoxLayout never wraps -- the row (and everything sized to match it)
+    // got clipped. Splitting into two rows of up to 3 buttons each keeps
+    // every button at a readable, un-clipped size on a 1366px-wide screen.
+    auto* pActionsRow1 = new QHBoxLayout();
+    m_pLoadButton = new QPushButton(QStringLiteral("Încarcă pe deck-ul liber"), pContent);
+    m_pPreviewButton = new QPushButton(QStringLiteral("Preascultă"), pContent);
+    m_pAddButton = new QPushButton(QStringLiteral("Adaugă după curentă"), pContent);
+    for (QPushButton* pButton : {m_pLoadButton, m_pPreviewButton, m_pAddButton}) {
         pButton->setEnabled(false);
-        pActions->addWidget(pButton);
+        pActionsRow1->addWidget(pButton);
     }
-    pActions->addStretch(1);
-    pLayout->addLayout(pActions);
+    pActionsRow1->addStretch(1);
+    pLayout->addLayout(pActionsRow1);
+
+    auto* pActionsRow2 = new QHBoxLayout();
+    m_pNotNowButton = new QPushButton(QStringLiteral("Nu acum"), pContent);
+    m_pWhyButton = new QPushButton(QStringLiteral("De ce?"), pContent);
+    for (QPushButton* pButton : {m_pNotNowButton, m_pWhyButton}) {
+        pButton->setEnabled(false);
+        pActionsRow2->addWidget(pButton);
+    }
+    pActionsRow2->addStretch(1);
+    pLayout->addLayout(pActionsRow2);
 
     connect(m_pLoadButton, &QPushButton::clicked, this, &DlgDJAppSuggestions::slotLoadToFreeDeck);
     connect(m_pPreviewButton, &QPushButton::clicked, this, &DlgDJAppSuggestions::slotPreview);

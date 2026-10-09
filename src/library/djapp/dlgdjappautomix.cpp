@@ -1,9 +1,11 @@
 #include "library/djapp/dlgdjappautomix.h"
 
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLayoutItem>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QVBoxLayout>
 
 #include "library/djapp/djappautopilot.h"
@@ -20,10 +22,29 @@ DlgDJAppAutomix::DlgDJAppAutomix(WLibrary* pParent, DJAppAutopilot* pAutopilot)
           m_pCandidatesSection(nullptr),
           m_pCandidatesLayout(nullptr) {
     djappui::setupView(this);
-    auto* pLayout = new QVBoxLayout(this);
+
+    // Same laptop-screen fix as DlgDJAppSuggestions (Dan reported this
+    // class of problem for the DJ App panel generally, not just one view):
+    // wrap the content in a QScrollArea so a short library panel scrolls
+    // instead of clipping the toggle/status/candidate list. Invisible on a
+    // tall-enough screen.
+    auto* pOuterLayout = new QVBoxLayout(this);
+    pOuterLayout->setContentsMargins(0, 0, 0, 0);
+    pOuterLayout->setSpacing(0);
+
+    auto* pScrollArea = new QScrollArea(this);
+    pScrollArea->setWidgetResizable(true);
+    pScrollArea->setFrameShape(QFrame::NoFrame);
+    pScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    pOuterLayout->addWidget(pScrollArea);
+
+    auto* pContent = new QWidget(pScrollArea);
+    pScrollArea->setWidget(pContent);
+
+    auto* pLayout = new QVBoxLayout(pContent);
     pLayout->setContentsMargins(8, 6, 8, 6);
     pLayout->setSpacing(6);
-    pLayout->addWidget(djappui::newTitle(QStringLiteral("Automix"), this));
+    pLayout->addWidget(djappui::newTitle(QStringLiteral("Automix"), pContent));
     pLayout->addWidget(djappui::newMutedLabel(
             QStringLiteral(
                     "Variantă minimă (testul de azi, 9 oct, extinsă cu feedback-ul lui Dan): "
@@ -34,19 +55,19 @@ DlgDJAppAutomix::DlgDJAppAutomix(WLibrary* pParent, DJAppAutopilot* pAutopilot)
                     "Dacă ai pus tu o piesă pe deck-ul liber, rămâne piesa ta și nu arată "
                     "variante. Dacă apeși tu MIX, nu intervine.")
                     .arg(static_cast<int>(djapp::autopilot::kLookaheadSec)),
-            this));
+            pContent));
 
-    m_pToggleButton = new QPushButton(this);
+    m_pToggleButton = new QPushButton(pContent);
     connect(m_pToggleButton, &QPushButton::clicked, this, &DlgDJAppAutomix::slotToggleClicked);
     auto* pToggleRow = new QHBoxLayout();
     pToggleRow->addWidget(m_pToggleButton);
     pToggleRow->addStretch(1);
     pLayout->addLayout(pToggleRow);
 
-    m_pStatusLabel = djappui::newMutedLabel(QStringLiteral("oprit"), this);
+    m_pStatusLabel = djappui::newMutedLabel(QStringLiteral("oprit"), pContent);
     pLayout->addWidget(m_pStatusLabel);
 
-    m_pCandidatesSection = new QWidget(this);
+    m_pCandidatesSection = new QWidget(pContent);
     m_pCandidatesLayout = new QVBoxLayout(m_pCandidatesSection);
     m_pCandidatesLayout->setContentsMargins(0, 0, 0, 0);
     m_pCandidatesLayout->setSpacing(4);
