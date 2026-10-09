@@ -1362,6 +1362,7 @@ add_library(
   src/library/djapp/djappautopilot.cpp
   src/library/djapp/djappautopilotlogic.cpp
   src/library/djapp/djappfeature.cpp
+  src/library/djapp/djappoverviewmarkers.cpp
   src/library/djapp/djappsuggestions.cpp
   src/library/djapp/djappui.cpp
   src/library/djapp/dlgdjappanalysis.cpp
@@ -2733,6 +2734,7 @@ if(BUILD_TESTING)
     src/test/stemtwin_test.cpp
     src/test/djappautopilot_test.cpp
     src/test/djappbraindbreader_test.cpp
+    src/test/djappoverviewmarkers_test.cpp
     src/test/djappsuggestions_test.cpp
     src/test/controlapi_test.cpp
     src/test/basetrackcache_test.cpp

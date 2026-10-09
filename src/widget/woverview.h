@@ -1,10 +1,12 @@
 #pragma once
 
 #include <QColor>
+#include <QFutureWatcher>
 #include <QList>
 #include <QPixmap>
 
 #include "analyzer/analyzerprogress.h"
+#include "library/djapp/djappoverviewmarkers.h"
 #include "track/track_decl.h"
 #include "track/trackid.h"
 #include "util/parented_ptr.h"
@@ -71,6 +73,10 @@ class WOverview : public WWidget, public TrackDropTarget {
     void slotMinuteMarkersChanged(bool v);
     void slotScalingChanged();
 
+    // DJ App (docs/decisions/0032): brain.db read finished on a worker
+    // thread (QtConcurrent::run), picks up the result on the UI thread.
+    void slotBrainMarkersReady();
+
   private:
     // Append the waveform overview pixmap according to available data
     // in waveform
@@ -96,6 +102,13 @@ class WOverview : public WWidget, public TrackDropTarget {
     void drawAnalyzerProgress(QPainter* pPainter);
     void drawRangeMarks(QPainter* pPainter, const float& offset, const float& gain);
     void drawMarks(QPainter* pPainter, const float offset, const float gain);
+    // DJ App (docs/decisions/0032): brain.db-derived markers, distinct from
+    // Mixxx's own cue marks (drawMarks above) both in shape/placement and
+    // in never reading from the same data (WaveformMarkSet).
+    void drawVocalRegions(QPainter* pPainter, const float offset, const float gain);
+    void drawBrainPoints(QPainter* pPainter, const float offset, const float gain);
+    void fetchBrainMarkersAsync(const QString& location);
+    double secondsToSamplePosition(double seconds) const;
     void drawPickupPosition(QPainter* pPainter);
     void drawTimeRuler(QPainter* pPainter);
     void drawMarkLabels(QPainter* pPainter, const float offset, const float gain);
@@ -235,4 +248,18 @@ class WOverview : public WWidget, public TrackDropTarget {
     std::vector<WaveformMarkRange> m_markRanges;
     WaveformMarkLabel m_cuePositionLabel;
     WaveformMarkLabel m_cueTimeDistanceLabel;
+
+    // DJ App (docs/decisions/0032): brain.db-derived markers for this
+    // widget. m_brainMarkers is only ever written on the UI thread (inside
+    // slotBrainMarkersReady), so paintEvent can read it directly.
+    djapp::overview::BrainMarkers m_brainMarkers;
+    QFutureWatcher<djapp::overview::BrainMarkers> m_brainMarkersWatcher;
+    // The track location the in-flight (or most recently finished) fetch
+    // was for. slotBrainMarkersReady discards a stale result if the loaded
+    // track changed again while the read was running.
+    QString m_brainMarkersRequestedLocation;
+    QColor m_mixInColor;
+    QColor m_mixOutColor;
+    QColor m_vocalRegionColor;
+    QColor m_sectionColor;
 };

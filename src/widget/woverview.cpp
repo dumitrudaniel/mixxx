@@ -7,14 +7,18 @@
 #include <QPaintEvent>
 #include <QPainter>
 #include <QPen>
+#include <QPolygonF>
 #include <QVBoxLayout>
+#include <QtConcurrentRun>
 
 #include "analyzer/analyzerprogress.h"
 #include "control/controlproxy.h"
 #include "engine/engine.h"
+#include "library/djapp/braindbreader.h"
 #include "mixer/playermanager.h"
 #include "moc_woverview.cpp"
 #include "preferences/colorpalettesettings.h"
+#include "preferences/usersettings.h"
 #include "track/track.h"
 #include "util/colorcomponents.h"
 #include "util/dnd.h"
@@ -134,6 +138,14 @@ WOverview::WOverview(
 
     connect(pPlayerManager, &PlayerManager::trackAnalyzerProgress,
             this, &WOverview::onTrackAnalyzerProgress);
+
+    // DJ App (docs/decisions/0032): brain.db read happens on a worker
+    // thread (QtConcurrent::run from fetchBrainMarkersAsync); this just
+    // picks the result back up on the UI thread when it's done.
+    connect(&m_brainMarkersWatcher,
+            &QFutureWatcher<djapp::overview::BrainMarkers>::finished,
+            this,
+            &WOverview::slotBrainMarkersReady);
 }
 
 void WOverview::setup(const QDomNode& node, const SkinContext& context) {
@@ -193,6 +205,33 @@ void WOverview::setup(const QDomNode& node, const SkinContext& context) {
     if (!beatTickColorName.isNull()) {
         m_beatTickColor = QColor(beatTickColorName);
         m_beatTickColor = WSkinColor::getCorrectColor(m_beatTickColor);
+    }
+
+    // DJ App (docs/decisions/0032): brain.db marker colors. Deliberately
+    // distinct from the cue/hotcue marks' colors (m_marks, set up below) so
+    // the two never read as the same kind of marker: green/orange corner
+    // triangles for mix-in/mix-out (vs. cue marks' full-height flagged
+    // lines), a cool blue dashed line for section boundaries, and a soft
+    // translucent magenta band for vocal regions.
+    m_mixInColor = QColor(0x4C, 0xAF, 0x50); // green
+    const QString mixInColorName = context.selectString(node, "MixInColor");
+    if (!mixInColorName.isNull()) {
+        m_mixInColor = WSkinColor::getCorrectColor(QColor(mixInColorName));
+    }
+    m_mixOutColor = QColor(0xFF, 0x98, 0x00); // orange
+    const QString mixOutColorName = context.selectString(node, "MixOutColor");
+    if (!mixOutColorName.isNull()) {
+        m_mixOutColor = WSkinColor::getCorrectColor(QColor(mixOutColorName));
+    }
+    m_sectionColor = QColor(0x42, 0xA5, 0xF5); // light blue
+    const QString sectionColorName = context.selectString(node, "SectionColor");
+    if (!sectionColorName.isNull()) {
+        m_sectionColor = WSkinColor::getCorrectColor(QColor(sectionColorName));
+    }
+    m_vocalRegionColor = QColor(0xE0, 0x40, 0xC0); // magenta, drawn translucent
+    const QString vocalRegionColorName = context.selectString(node, "VocalRegionColor");
+    if (!vocalRegionColorName.isNull()) {
+        m_vocalRegionColor = WSkinColor::getCorrectColor(QColor(vocalRegionColorName));
     }
 
     // setup hotcues and cue and loop(s)
@@ -380,6 +419,7 @@ void WOverview::slotTrackLoaded(TrackPointer pTrack) {
     m_trackLoaded = true;
     if (m_pCurrentTrack) {
         updateCues(m_pCurrentTrack->getCuePoints());
+        fetchBrainMarkersAsync(m_pCurrentTrack->getLocation());
     }
     update();
 }
@@ -409,6 +449,13 @@ void WOverview::slotLoadingTrack(TrackPointer pNewTrack, TrackPointer pOldTrack)
     // signal has been received.
     m_trackLoaded = false;
     m_endOfTrack = false;
+
+    // DJ App (docs/decisions/0032): clear immediately so stale markers from
+    // the previous track never flash on the new one, even for the single
+    // frame before the new track's own fetch (if any) completes. Graceful
+    // degradation: an empty/default BrainMarkers just means "nothing drawn".
+    m_brainMarkers = djapp::overview::BrainMarkers();
+    m_brainMarkersRequestedLocation.clear();
 
     if (pNewTrack) {
         m_pCurrentTrack = pNewTrack;
@@ -752,8 +799,15 @@ void WOverview::paintEvent(QPaintEvent* pEvent) {
             const auto gain = static_cast<CSAMPLE_GAIN>(length() - 2) /
                     static_cast<CSAMPLE_GAIN>(trackSamples);
 
+            // DJ App (docs/decisions/0032): vocal regions first (a soft
+            // background tint, must sit under everything else), then the
+            // existing cue marks, then the brain mix-in/mix-out/section
+            // markers on top -- distinguishable by shape/placement from
+            // drawMarks' cue flags, never overlapping their data.
+            drawVocalRegions(&painter, offset, gain);
             drawRangeMarks(&painter, offset, gain);
             drawMarks(&painter, offset, gain);
+            drawBrainPoints(&painter, offset, gain);
             drawPickupPosition(&painter);
             drawTimeRuler(&painter);
             drawMarkLabels(&painter, offset, gain);
@@ -948,6 +1002,136 @@ void WOverview::drawBeatTicks(QPainter* pPainter, const float offset, const floa
             pPainter->drawLine(QPointF(tickPosition, 0.0), QPointF(tickPosition, height()));
         } else {
             pPainter->drawLine(QPointF(0.0, tickPosition), QPointF(width(), tickPosition));
+        }
+    }
+}
+
+void WOverview::drawVocalRegions(QPainter* pPainter, const float offset, const float gain) {
+    // DJ App (docs/decisions/0032): brain's vocal map, shown as a soft
+    // translucent band -- deliberately NOT a hard-edged overlay like
+    // drawPlayedOverlay, so it never reads as a second "played" indicator.
+    if (m_brainMarkers.vocalSegments.isEmpty()) {
+        return;
+    }
+
+    PainterScope painterScope(pPainter);
+    QColor fill = m_vocalRegionColor;
+    fill.setAlpha(60); // soft background tint, never dominant
+    pPainter->setPen(Qt::NoPen);
+    pPainter->setBrush(fill);
+
+    const float widgetLength = static_cast<float>(length());
+    for (const djapp::overview::VocalSegment& segment : m_brainMarkers.vocalSegments) {
+        const float startPos = math_clamp(
+                offset + static_cast<float>(secondsToSamplePosition(segment.startSec)) * gain,
+                0.0f,
+                widgetLength);
+        const float endPos = math_clamp(
+                offset + static_cast<float>(secondsToSamplePosition(segment.endSec)) * gain,
+                0.0f,
+                widgetLength);
+        if (endPos <= startPos) {
+            continue;
+        }
+        if (m_orientation == Qt::Horizontal) {
+            pPainter->drawRect(QRectF(startPos, 0.0, endPos - startPos, height()));
+        } else {
+            pPainter->drawRect(QRectF(0.0, startPos, width(), endPos - startPos));
+        }
+    }
+}
+
+void WOverview::drawBrainPoints(QPainter* pPainter, const float offset, const float gain) {
+    // DJ App (docs/decisions/0032): brain's mix-in/mix-out points and
+    // section boundaries. Shapes are chosen to never be confused with
+    // Mixxx's own cue marks (drawMarks): corner triangles here vs.
+    // full-height flagged lines there, and a dashed (not solid) line with a
+    // single-letter label for section boundaries.
+    if (!m_pCurrentTrack) {
+        return;
+    }
+    const float widgetLength = static_cast<float>(length());
+    const float widgetBreadth = static_cast<float>(breadth());
+
+    auto xAt = [&](double seconds) {
+        return math_clamp(
+                offset + static_cast<float>(secondsToSamplePosition(seconds)) * gain,
+                0.0f,
+                widgetLength);
+    };
+
+    if (m_brainMarkers.valid) {
+        PainterScope painterScope(pPainter);
+        pPainter->setPen(Qt::NoPen);
+
+        if (m_brainMarkers.mixInSec >= 0.0) {
+            const float x = xAt(m_brainMarkers.mixInSec);
+            const float triSize = std::max(4.0f, widgetBreadth * 0.12f);
+            pPainter->setBrush(m_mixInColor);
+            // Small triangle pointing down, hugging the TOP edge.
+            if (m_orientation == Qt::Horizontal) {
+                QPolygonF triangle;
+                triangle << QPointF(x - triSize, 0.0) << QPointF(x + triSize, 0.0)
+                         << QPointF(x, triSize);
+                pPainter->drawPolygon(triangle);
+            } else {
+                QPolygonF triangle;
+                triangle << QPointF(0.0, x - triSize) << QPointF(0.0, x + triSize)
+                         << QPointF(triSize, x);
+                pPainter->drawPolygon(triangle);
+            }
+        }
+
+        pPainter->setBrush(m_mixOutColor);
+        const float triSize = std::max(4.0f, widgetBreadth * 0.12f);
+        for (double mixOutSec : m_brainMarkers.mixOutSec) {
+            const float x = xAt(mixOutSec);
+            // Small triangle pointing up, hugging the BOTTOM edge -- the
+            // opposite corner from mix-in, so the two never overlap even
+            // when a track's in/out points are close together.
+            if (m_orientation == Qt::Horizontal) {
+                QPolygonF triangle;
+                triangle << QPointF(x - triSize, widgetBreadth) << QPointF(x + triSize, widgetBreadth)
+                         << QPointF(x, widgetBreadth - triSize);
+                pPainter->drawPolygon(triangle);
+            } else {
+                QPolygonF triangle;
+                triangle << QPointF(widgetBreadth, x - triSize) << QPointF(widgetBreadth, x + triSize)
+                         << QPointF(widgetBreadth - triSize, x);
+                pPainter->drawPolygon(triangle);
+            }
+        }
+    }
+
+    if (!m_brainMarkers.sections.isEmpty()) {
+        PainterScope painterScope(pPainter);
+        QPen sectionPen(m_sectionColor);
+        sectionPen.setWidthF(std::max(1.0, static_cast<double>(m_scaleFactor)));
+        sectionPen.setStyle(Qt::DashLine);
+        pPainter->setPen(sectionPen);
+
+        QFont labelFont = pPainter->font();
+        labelFont.setPixelSize(std::max(7, static_cast<int>(m_iLabelFontSize * m_scaleFactor * 0.8)));
+        pPainter->setFont(labelFont);
+        const qreal labelAscent = QFontMetricsF(labelFont).ascent();
+
+        for (const djapp::overview::SectionMark& section : m_brainMarkers.sections) {
+            const float x = xAt(section.startSec);
+            if (m_orientation == Qt::Horizontal) {
+                pPainter->drawLine(QPointF(x, 0.0), QPointF(x, height()));
+            } else {
+                pPainter->drawLine(QPointF(0.0, x), QPointF(width(), x));
+            }
+            if (!section.sectionType.isEmpty()) {
+                const QString label = section.sectionType.left(1).toUpper();
+                pPainter->setPen(m_sectionColor);
+                if (m_orientation == Qt::Horizontal) {
+                    pPainter->drawText(QPointF(x + 2.0, labelAscent), label);
+                } else {
+                    pPainter->drawText(QPointF(2.0, x - 2.0), label);
+                }
+                pPainter->setPen(sectionPen);
+            }
         }
     }
 }
@@ -1629,6 +1813,47 @@ double WOverview::samplePositionToSeconds(double sample) {
     double trackTime = sample /
             (m_trackSampleRateControl.get() * mixxx::kEngineChannelOutputCount);
     return trackTime / rate;
+}
+
+// DJ App (docs/decisions/0032): the exact inverse of samplePositionToSeconds
+// above, needed to place brain.db's second-based markers (mix points,
+// vocal segments, section boundaries) using the same offset/gain projection
+// drawMarks/drawRangeMarks already use for sample-position-based marks.
+double WOverview::secondsToSamplePosition(double seconds) const {
+    const double rate = m_pRateRatioControl->get();
+    VERIFY_OR_DEBUG_ASSERT(rate != 0.0) {
+        return 0.0;
+    }
+    return seconds * rate * m_trackSampleRateControl.get() * mixxx::kEngineChannelOutputCount;
+}
+
+void WOverview::fetchBrainMarkersAsync(const QString& location) {
+    if (location.isEmpty()) {
+        return;
+    }
+    m_brainMarkersRequestedLocation = location;
+    const QString dbPath = BrainDbReader::configuredPath(
+            m_pConfig->getValueString(ConfigKey(QStringLiteral("[DJApp]"),
+                    QStringLiteral("BrainDb"))));
+    if (dbPath.isEmpty()) {
+        // Graceful degradation: no brain.db configured, no markers, no
+        // background work, no error.
+        return;
+    }
+    m_brainMarkersWatcher.setFuture(
+            QtConcurrent::run(&djapp::overview::fetchOverviewMarkers, dbPath, location, 2000));
+}
+
+void WOverview::slotBrainMarkersReady() {
+    // The loaded track may have changed again while this read was running
+    // (fast track switching, or a fetch for a since-replaced stem twin);
+    // discard a result that is no longer for the currently loaded track.
+    if (!m_pCurrentTrack ||
+            m_pCurrentTrack->getLocation() != m_brainMarkersRequestedLocation) {
+        return;
+    }
+    m_brainMarkers = m_brainMarkersWatcher.result();
+    update();
 }
 
 void WOverview::resizeEvent(QResizeEvent* pEvent) {
