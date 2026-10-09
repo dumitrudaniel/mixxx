@@ -3,6 +3,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QSqlDatabase>
+#include <algorithm>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QtDebug>
@@ -160,6 +161,35 @@ std::optional<double> DJAppAutopilot::readMixOutSec(
     return result;
 }
 
+std::optional<double> DJAppAutopilot::readMixInSec(const QString& location) const {
+    const QString dbPath = brainDbPath();
+    if (dbPath.isEmpty() || location.isEmpty()) {
+        return std::nullopt;
+    }
+    std::optional<double> result;
+    QString error;
+    const QString targetKey = BrainDbReader::locationKey(location);
+    BrainDbReader::withReadOnlyConnection(
+            dbPath,
+            2000,
+            [&](const QSqlDatabase& db) {
+                QSqlQuery query(db);
+                if (!query.exec(QStringLiteral(
+                            "SELECT location, mix_in_sec FROM mix_points"))) {
+                    return;
+                }
+                while (query.next()) {
+                    if (BrainDbReader::locationKey(query.value(0).toString()) != targetKey) {
+                        continue;
+                    }
+                    result = query.value(1).toDouble();
+                    return;
+                }
+            },
+            &error);
+    return result;
+}
+
 void DJAppAutopilot::refreshMixOutCache(int deckNumber) {
     const int i = deckNumber - 1;
     const TrackPointer pTrack =
@@ -239,6 +269,7 @@ void DJAppAutopilot::triggerMix(int playingDeckNumber) {
     m_pickedLabel.clear();
     m_pickedRisky = false;
     m_pickedRecipeHint.clear();
+    m_pendingSeekDeck = 0;
     resetCandidates();
 }
 
@@ -401,6 +432,15 @@ void DJAppAutopilot::loadCandidate(
     // when the SOURCE track changes (refreshMixOutCache, a genuinely new
     // cycle) or the deadline is reached and the transition actually fires.
     emit loadTrackToPlayer(candidate.track, targetGroup, false);
+    // Dan, 2026-10-09: "da play de la inceput" - nothing ever seeked a
+    // newly loaded deck past its intro to brain's computed entry point;
+    // tick() performs the actual seek once this deck reports loaded with a
+    // known duration (readMixInSec here only does the brain.db lookup).
+    // nullopt (no mix_points row) leaves the deck wherever Mixxx's own load
+    // landed it, same as before this fix.
+    const std::optional<double> mixInSec = readMixInSec(candidate.track->getLocation());
+    m_pendingSeekDeck = mixInSec.has_value() ? otherDeckNumber : 0;
+    m_pendingSeekSec = mixInSec.value_or(0.0);
     setStatus(Status{StatusKind::Picked, playingDeckNumber, 0.0, candidate.label, m_pickedRisky});
 }
 
@@ -476,6 +516,22 @@ void DJAppAutopilot::tick() {
     refreshMixOutCache(1);
     refreshMixOutCache(2);
 
+    if (m_pendingSeekDeck != 0) {
+        DeckProxies& seekDeck = m_pendingSeekDeck == 1 ? m_deck1 : m_deck2;
+        const double duration = seekDeck.duration.get();
+        // Wait for the load to actually land (trackLoaded flips true before
+        // duration is necessarily populated): retried every tick, no limit
+        // needed -- the deadline is seconds to minutes away (fix #3 loads
+        // the moment the picker opens), nothing else depends on this.
+        if (seekDeck.trackLoaded.toBool() && duration > 0.0) {
+            const double fraction = m_pendingSeekSec <= 0.0
+                    ? 0.0
+                    : std::min(1.0, m_pendingSeekSec / duration);
+            seekDeck.playposition.set(fraction);
+            m_pendingSeekDeck = 0;
+        }
+    }
+
     const int engineState = static_cast<int>(m_engineState.get());
     if (m_lastEngineState != 0 && engineState == 0 && m_pendingFromDeck != 0) {
         // A transition just finished: its outgoing deck is now free (left
@@ -493,6 +549,7 @@ void DJAppAutopilot::tick() {
         m_pickedLabel.clear();
         m_pickedRisky = false;
         m_pickedRecipeHint.clear();
+        m_pendingSeekDeck = 0;
         setStatus(Status{StatusKind::Off, 0, 0.0, QString()});
         return;
     }
@@ -553,6 +610,7 @@ void DJAppAutopilot::tick() {
             m_pickedLabel.clear();
             m_pickedRisky = false;
             m_pickedRecipeHint.clear();
+            m_pendingSeekDeck = 0;
             setStatus(Status{StatusKind::Watching, playingDeck, mixOutSec.value(), QString()});
         } else if (!m_pickedLabel.isEmpty()) {
             // Inside the lookahead window, other deck already spoken for by

@@ -96,6 +96,12 @@ class DJAppAutopilot : public QObject {
     void refreshMixOutCache(int deckNumber);
     double activeRecipeLengthBeats() const;
     std::optional<double> readMixOutSec(const QString& location, double lengthBeats) const;
+    // brain.db's mix_points.mix_in_sec for `location` (Dan, 2026-10-09: "da
+    // play de la inceput" - nothing ever seeked a newly loaded deck past
+    // its intro to brain's computed entry point). nullopt if brain.db has
+    // no mix_points row for it (e.g. not analyzed) -- the deck is then left
+    // wherever Mixxx's own load landed it, same as before this fix.
+    std::optional<double> readMixInSec(const QString& location) const;
 
     // A resolved candidate (change 1/3/4): the actual track plus the same
     // display fields as DJAppAutopilotCandidate.
@@ -166,6 +172,15 @@ class DJAppAutopilot : public QObject {
     int m_overrideEmptyDeck = 0;
     int m_awaitingLoadDeck = 0;
     bool m_lastEnabled = false;
+
+    // Dan, 2026-10-09: seek-to-mix-in, scoped to the autopilot's own picks
+    // (loadCandidate(), whether auto-loaded or Dan's own click on a picker
+    // row) -- the separate Sugestii view is untouched, Dan still decides
+    // the cue there. Set by loadCandidate(); tick() performs the seek (and
+    // clears this) once that deck reports loaded with a known duration, so
+    // it always lands well before the transition's own incoming.play.
+    int m_pendingSeekDeck = 0;
+    double m_pendingSeekSec = 0.0;
 
     // Picker cache (change 2/3): avoids re-querying brain.db every 500 ms
     // tick while the same lookahead window is open.

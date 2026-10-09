@@ -1153,6 +1153,17 @@ void AutomixTransitionController::finish() {
         incomingDeck().play.set(1.0);
         m_incomingNeedsPlay = false;
     }
+    // Dan, 2026-10-09: "piesa veche continua sa ruleze... lasa pana la
+    // final" - every recipe's outgoing EQ lanes land on kill (confirmed
+    // silent by the loop above), but nothing ever stopped the deck itself:
+    // it kept its transport running, audibly silent, all the way to the
+    // physical end of the file. That also left both decks' `play` true at
+    // once, which is exactly the case djapp::autopilot::decide() treats as
+    // "ambiguous, wait" (WaitsWhenNeitherOrBothDecksPlay) - so the autopilot
+    // could stall after its very first transition until Dan stopped the old
+    // deck by hand. Pause it (not eject: the track stays loaded, same as
+    // today) once it is already silent.
+    outgoingDeck().play.set(0.0);
     qInfo() << "Automix: finished" << m_recipe.id;
     // The incoming deck's glide back to its own tempo outlives the transition.
     startTempoReturn();
