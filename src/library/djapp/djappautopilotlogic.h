@@ -35,9 +35,11 @@ std::optional<double> nearestMixOut(const QMap<int, double>& byLength, double le
 
 // How long before a track's mix-out point Dan gets to see candidates (change
 // 2, live feedback 2026-10-09: "vreau să știu ce urmează mai din timp, nu în
-// ultimul moment"). The actual load/trigger timing is unchanged (still
-// at/after mix_out_sec); only when the picker opens moves earlier.
-constexpr double kLookaheadSec = 45.0;
+// ultimul moment"; raised from 45s to 120s on further feedback the same
+// night - "cu cât îl calculăm mai devreme cu atât mai bine"). The actual
+// load/trigger timing is unchanged (still at/after mix_out_sec); only when
+// the picker opens moves earlier.
+constexpr double kLookaheadSec = 120.0;
 
 // The up-to-3-candidate picker (change 3): how many rows to pull from brain's
 // allowed and risky suggestion lists.

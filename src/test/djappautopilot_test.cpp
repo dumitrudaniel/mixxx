@@ -48,9 +48,9 @@ Inputs baseInputs() {
     in.deck2Playing = false;
     in.deck1Loaded = true;
     in.deck2Loaded = false;
-    in.deck1PositionSec = 100.0;
+    in.deck1PositionSec = 310.0;
     in.deck2PositionSec = 0.0;
-    in.deck1MixOutSec = 90.0; // already past it
+    in.deck1MixOutSec = 300.0; // already past it
     in.deck2MixOutSec = std::nullopt;
     return in;
 }
@@ -80,7 +80,7 @@ TEST(DJAppAutopilotLogicTest, WaitsWhenNeitherOrBothDecksPlay) {
 
 TEST(DJAppAutopilotLogicTest, WaitsBeforeMixOutPoint) {
     Inputs in = baseInputs();
-    in.deck1PositionSec = 10.0; // mix-out is at 90.0
+    in.deck1PositionSec = 10.0; // mix-out is at 300.0, window opens at 180.0
     EXPECT_EQ(decide(in).action, Action::None);
 }
 
@@ -119,8 +119,8 @@ TEST(DJAppAutopilotLogicTest, OverrideEmptyDeckTreatsAStaleTrackAsEmpty) {
 TEST(DJAppAutopilotLogicTest, EntersChoosingInsideLookaheadWindow) {
     Inputs in = baseInputs();
     in.deck2Loaded = false; // other deck still free
-    // mix-out is at 90.0, lookahead is 45s -> window opens at 45.0.
-    in.deck1PositionSec = 50.0;
+    // mix-out is at 300.0, lookahead is 120s -> window opens at 180.0.
+    in.deck1PositionSec = 200.0;
     const Decision d = decide(in);
     EXPECT_EQ(d.action, Action::ShowCandidates);
     EXPECT_EQ(d.playingDeckNumber, 1);
@@ -129,19 +129,19 @@ TEST(DJAppAutopilotLogicTest, EntersChoosingInsideLookaheadWindow) {
 
 TEST(DJAppAutopilotLogicTest, StaysWatchingRightBeforeTheLookaheadWindow) {
     Inputs in = baseInputs();
-    in.deck1PositionSec = 44.9; // window opens at 45.0
+    in.deck1PositionSec = 179.9; // window opens at 180.0
     EXPECT_EQ(decide(in).action, Action::None);
 }
 
 TEST(DJAppAutopilotLogicTest, ChoosingWindowOpensExactlyAtTheThreshold) {
     Inputs in = baseInputs();
-    in.deck1PositionSec = 45.0; // mixOutSec(90) - kLookaheadSec(45)
+    in.deck1PositionSec = 180.0; // mixOutSec(300) - kLookaheadSec(120)
     EXPECT_EQ(decide(in).action, Action::ShowCandidates);
 }
 
 TEST(DJAppAutopilotLogicTest, ManualLoadDuringTheWindowTakesPriorityOverThePicker) {
     Inputs in = baseInputs();
-    in.deck1PositionSec = 50.0; // inside the window, before the deadline
+    in.deck1PositionSec = 200.0; // inside the window, before the deadline
     in.deck2Loaded = true; // Dan already put a track there himself
     const Decision d = decide(in);
     // No picker over Dan's own pick; the deadline will just Trigger later.
@@ -151,7 +151,7 @@ TEST(DJAppAutopilotLogicTest, ManualLoadDuringTheWindowTakesPriorityOverThePicke
 
 TEST(DJAppAutopilotLogicTest, OverrideEmptyDeckAlsoAppliesInsideTheWindow) {
     Inputs in = baseInputs();
-    in.deck1PositionSec = 50.0;
+    in.deck1PositionSec = 200.0;
     in.deck2Loaded = true; // stale track from a transition that just finished
     in.overrideEmptyDeck = 2;
     const Decision d = decide(in);
@@ -161,7 +161,7 @@ TEST(DJAppAutopilotLogicTest, OverrideEmptyDeckAlsoAppliesInsideTheWindow) {
 
 TEST(DJAppAutopilotLogicTest, DeadlineReachedWithNoChoiceAutoPicksTop) {
     Inputs in = baseInputs();
-    in.deck1PositionSec = 90.0; // exactly at mixOutSec: the deadline
+    in.deck1PositionSec = 300.0; // exactly at mixOutSec: the deadline
     in.deck2Loaded = false; // Dan never clicked a candidate
     const Decision d = decide(in);
     EXPECT_EQ(d.action, Action::PickAndLoad);
