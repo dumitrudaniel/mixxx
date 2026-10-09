@@ -410,6 +410,16 @@ QList<DJAppAutopilot::Candidate> DJAppAutopilot::queryCandidates(
             out.append(*c);
         }
     }
+    // Dan, 2026-10-09: "nu vreau sa mai ia prima optiune daca aceasta este
+    // cu fade curat... fade curat sa aleaga doar daca nu are alta
+    // optiune." A risky candidate can still have a non-fade_curat hint
+    // (e.g. a key clash alone, with tempo and grid both fine) - push any
+    // fade_curat candidate to the back, stable otherwise (allowed-before-
+    // risky, score order within each, all untouched), so the first pick
+    // only falls back to fade_curat when every other candidate is one too.
+    std::stable_partition(out.begin(), out.end(), [](const Candidate& c) {
+        return c.recipeHint != QLatin1String("fade_curat");
+    });
     return out;
 }
 
