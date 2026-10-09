@@ -59,7 +59,7 @@ constexpr const char* kBuiltinJsonUrgenta2 = R"JSON(    {
 constexpr const char* kBuiltinJsonScurt4 = R"JSON(    {
       "id": "scurt4",
       "name": "Scurt 4",
-      "notes": "4 bare: grila nesigura, semba/kompa live, mod scoala. Piesa veche iese complet pana la bara 2.75 (timpul 11, 11/16 din reteta). Basul se schimba liniar de la bara 0, plin cel tarziu la bara 2 (Dan, 2026-10-09: pe o reteta asa scurta vrea basul nou intrat full cat mai din timp, nu sincronizat cu 11/16 ca la Standard 8/Lung 16).",
+      "notes": "4 bare: grila nesigura, semba/kompa live, mod scoala. Piesa veche iese complet pana la bara 2.75 (timpul 11, 11/16 din reteta). Basul se schimba liniar de la bara 0, plin cel tarziu la bara 2 (Dan, 2026-10-09: pe o reteta asa scurta vrea basul nou intrat full cat mai din timp, nu sincronizat cu 11/16 ca la Standard 8/Lung 16). Inaltele si mediile vechi coboara liniar in acelasi ritm cu basul (Dan: evita curbele cos/smoothstep, 'rapide pe final'; suprapunerea cu piesa noua e ok, vocile raman separate prin garda de voce).",
       "length_bars": 4,
       "tempo": { "mode": "meet_return", "meet_bars": 4, "return_bars": 8 },
       "prepare_incoming": { "eq_low": "kill", "eq_mid": "kill", "eq_high": "kill" },
@@ -74,11 +74,9 @@ constexpr const char* kBuiltinJsonScurt4 = R"JSON(    {
         { "deck": "outgoing", "param": "eq_low", "points": [
           { "bar": 0, "value": "current" }, { "bar": 2, "value": "kill", "shape": "linear" } ] },
         { "deck": "outgoing", "param": "eq_high", "points": [
-          { "bar": 0, "value": "current" }, { "bar": 2, "value": "current" },
-          { "bar": 2.5, "value": "kill", "shape": "cos" } ] },
+          { "bar": 0, "value": "current" }, { "bar": 2, "value": "kill", "shape": "linear" } ] },
         { "deck": "outgoing", "param": "eq_mid", "points": [
-          { "bar": 0, "value": "current" }, { "bar": 2, "value": "current" },
-          { "bar": 2.75, "value": "kill", "shape": "smoothstep" } ] }
+          { "bar": 0, "value": "current" }, { "bar": 2, "value": "kill", "shape": "linear" } ] }
       ]
     },
 )JSON";
@@ -86,7 +84,7 @@ constexpr const char* kBuiltinJsonScurt4 = R"JSON(    {
 constexpr const char* kBuiltinJsonStandard8 = R"JSON(    {
       "id": "standard8",
       "name": "Standard 8",
-      "notes": "Implicit. Faza 1 (bare 0-3.5): mediile piesei noi urca, inaltele ei doar pana la -12 dB; basul ei ramane taiat pana la bara 3. Faza 2 (bare 3-5): bas schimbat liniar pe ultimele 2 bare (Dan, 2026-10-09: toata secventa decalata cu o jumatate de bara mai devreme fata de versiunea anterioara, basul ajunge full cu 0.5 bara inainte de cand piesa veche tace complet). Faza 3 (bare 3.5-5): mediile piesei vechi coboara la kill (smoothstep); din timpul 22 (ultima treime) se aude doar piesa noua (Dan, 2026-10-08). Filtrul si intrarea mai usoara in volum sunt oprite (enabled false); pune true ca sa le incerci.",
+      "notes": "Implicit. Faza 1 (bare 0-3.5): mediile piesei noi urca, inaltele ei doar pana la -12 dB; basul ei ramane taiat pana la bara 3. Faza 2 (bare 3-5): bas, inalte si medii vechi coboara liniar in paralel, toate pe ultimele 2 bare (Dan, 2026-10-09: 'cea care iese parca prea brusc are taiate frecventele' - inaltele/mediile vechi foloseau curbe cos/smoothstep, cu acelasi defect 'rapid pe final' ca vechiul bas; acum liniare si mai largi, se pot suprapune putin cu piesa noua, e ok cat timp vocile raman separate de garda de voce). Din timpul 22 (ultima treime) se aude doar piesa noua (Dan, 2026-10-08). Filtrul si intrarea mai usoara in volum sunt oprite (enabled false); pune true ca sa le incerci.",
       "length_bars": 8,
       "tempo": { "mode": "meet_return", "meet_bars": 4, "return_bars": 8 },
       "prepare_incoming": { "eq_low": "kill", "eq_mid": "kill", "eq_high": "kill" },
@@ -103,14 +101,14 @@ constexpr const char* kBuiltinJsonStandard8 = R"JSON(    {
           { "bar": 0, "value": "current" }, { "bar": 3, "value": "current" },
           { "bar": 5, "value": "kill", "shape": "linear" } ] },
         { "deck": "outgoing", "param": "eq_high", "points": [
-          { "bar": 0, "value": "current" }, { "bar": 3.5, "value": "current" },
-          { "bar": 4.5, "value": "kill", "shape": "cos" } ] },
+          { "bar": 0, "value": "current" }, { "bar": 3, "value": "current" },
+          { "bar": 5, "value": "kill", "shape": "linear" } ] },
         { "deck": "outgoing", "param": "eq_mid", "points": [
-          { "bar": 0, "value": "current" }, { "bar": 3.5, "value": "current" },
-          { "bar": 5, "value": "kill", "shape": "smoothstep" } ] },
+          { "bar": 0, "value": "current" }, { "bar": 3, "value": "current" },
+          { "bar": 5, "value": "kill", "shape": "linear" } ] },
         { "deck": "outgoing", "param": "filter", "enabled": false, "points": [
-          { "bar": 0, "value": "current" }, { "bar": 3.5, "value": "current" },
-          { "bar": 5, "value": 0.75, "shape": "smoothstep" } ] },
+          { "bar": 0, "value": "current" }, { "bar": 3, "value": "current" },
+          { "bar": 5, "value": 0.75, "shape": "linear" } ] },
         { "deck": "incoming", "param": "volume", "enabled": false, "points": [
           { "bar": 0, "value": "-2dB" }, { "bar": 1.5, "value": "current", "shape": "sin" } ] }
       ]
@@ -120,7 +118,7 @@ constexpr const char* kBuiltinJsonStandard8 = R"JSON(    {
 constexpr const char* kBuiltinJsonLung16 = R"JSON(    {
       "id": "lung16",
       "name": "Lung 16",
-      "notes": "16 bare: urban kiz, tarraxo, intro/outro lungi. Basul se schimba liniar pe ultimele 2 bare, pana exact cand piesa veche e complet afara (Dan, 2026-10-09: sincronizat cu regula 11/16, ca la Standard 8). Piesa veche iese complet pana la bara 11 (timpul 44, 11/16 din reteta).",
+      "notes": "16 bare: urban kiz, tarraxo, intro/outro lungi. Basul se schimba liniar pe ultimele 2 bare, pana exact cand piesa veche e complet afara (Dan, 2026-10-09: sincronizat cu regula 11/16, ca la Standard 8). Inaltele si mediile vechi coboara liniar in acelasi ritm cu basul (evita curbele cos/smoothstep 'rapide pe final'; suprapunerea cu piesa noua e ok, vocile raman separate prin garda de voce). Piesa veche iese complet pana la bara 11 (timpul 44, 11/16 din reteta).",
       "length_bars": 16,
       "tempo": { "mode": "meet_return", "meet_bars": 4, "return_bars": 8 },
       "prepare_incoming": { "eq_low": "kill", "eq_mid": "kill", "eq_high": "kill" },
@@ -137,11 +135,11 @@ constexpr const char* kBuiltinJsonLung16 = R"JSON(    {
           { "bar": 0, "value": "current" }, { "bar": 9, "value": "current" },
           { "bar": 11, "value": "kill", "shape": "linear" } ] },
         { "deck": "outgoing", "param": "eq_high", "points": [
-          { "bar": 0, "value": "current" }, { "bar": 8, "value": "current" },
-          { "bar": 9, "value": "kill", "shape": "cos" } ] },
+          { "bar": 0, "value": "current" }, { "bar": 9, "value": "current" },
+          { "bar": 11, "value": "kill", "shape": "linear" } ] },
         { "deck": "outgoing", "param": "eq_mid", "points": [
-          { "bar": 0, "value": "current" }, { "bar": 8, "value": "current" },
-          { "bar": 11, "value": "kill", "shape": "smoothstep" } ] }
+          { "bar": 0, "value": "current" }, { "bar": 9, "value": "current" },
+          { "bar": 11, "value": "kill", "shape": "linear" } ] }
       ]
     },
 )JSON";

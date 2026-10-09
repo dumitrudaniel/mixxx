@@ -73,22 +73,24 @@ TEST_F(AutomixRecipeTest, Standard8FollowsThePlan) {
     EXPECT_DOUBLE_EQ(0.0, inLow->valueAt(11.9, 0.0));
     EXPECT_NEAR(0.2512, inHigh->valueAt(14.0, 0.0), 1e-4);
     EXPECT_DOUBLE_EQ(1.0, outLow->valueAt(11.9, 1.0));
-    EXPECT_DOUBLE_EQ(1.0, outMid->valueAt(13.9, 1.0));
+    EXPECT_DOUBLE_EQ(1.0, outMid->valueAt(11.9, 1.0));
 
     // Phase 2 (bars 3-5): bass swaps linearly over the last 2 bars - Dan,
     // 2026-10-09: the whole sequence shifted 0.5 bar earlier than before,
-    // bass now lands full 0.5 bar before the outgoing track is fully out;
-    // highs still swap in one bar.
+    // bass now lands full 0.5 bar before the outgoing track is fully out.
     EXPECT_NEAR(0.0, outLow->valueAt(20.0, 1.0), 1e-12);
     EXPECT_NEAR(1.0, inLow->valueAt(20.0, 0.0), 1e-12);
     EXPECT_GT(outHigh->valueAt(15.0, 1.0), 0.0);
-    EXPECT_NEAR(0.0, outHigh->valueAt(18.0, 1.0), 1e-12);
+    EXPECT_NEAR(0.0, outHigh->valueAt(20.0, 1.0), 1e-12);
     EXPECT_NEAR(1.0, inHigh->valueAt(18.0, 0.0), 1e-12);
 
-    // Phase 3 (bars 3.5-5): outgoing mids fall to kill; from beat 22 (the
-    // last third) only the incoming track plays (Dan, 2026-10-08).
-    EXPECT_GT(outMid->valueAt(15.0, 1.0), 0.9);
-    EXPECT_NEAR(0.5, outMid->valueAt(17.0, 1.0), 1e-12);
+    // Phase 3 (bars 3-5): outgoing mids AND highs now fall to kill linearly over the
+    // same bars as the bass (Dan, 2026-10-09: "cea care iese parca prea brusc are
+    // taiate frecventele" - cos/smoothstep had the same "fast at the end" issue as
+    // the old bass swap). From beat 22 (the last third) only the incoming track
+    // plays (Dan, 2026-10-08).
+    EXPECT_GT(outMid->valueAt(12.5, 1.0), 0.9);
+    EXPECT_NEAR(0.5, outMid->valueAt(16.0, 1.0), 1e-12);
     EXPECT_NEAR(0.0, outMid->valueAt(20.0, 1.0), 1e-12);
     EXPECT_NEAR(0.0, outMid->valueAt(32.0, 1.0), 1e-12);
 }
