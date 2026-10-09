@@ -23,7 +23,7 @@
    </size>
   </property>
   <property name="windowTitle">
-   <string>About Mixxx</string>
+   <string>About DeejAI</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>

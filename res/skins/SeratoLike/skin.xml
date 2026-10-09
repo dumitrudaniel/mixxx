@@ -161,17 +161,20 @@
                       VU meter, default cover art etc. -->
       <LaunchImageStyle>
         LaunchImage {
-          background-color: #0f0f0f;
+          background-color: #0a0a0a;
+          background-image: url(skins:SeratoLike/palemoon/style/deejai_loading_bg.png);
+          background-repeat: no-repeat;
+          background-position: center;
         }
         QLabel {
           image: url(skins:SeratoLike/palemoon/style/mixxx_logo.svg);
           padding: 0;
           margin: 0px 2px 0px 2px;
           border: none;
-          min-width: 160px;
-          max-width: 160px;
-          min-height: 40px;
-          max-height: 40px;
+          min-width: 300px;
+          max-width: 300px;
+          min-height: 200px;
+          max-height: 200px;
         }
         QProgressBar {
           background: url(skins:SeratoLike/palemoon/style/progressbar_bg.svg);
@@ -289,17 +292,20 @@
       <!-- Classic theme. Bulky containers, hatched backgrounds, no knob arcs -->
       <LaunchImageStyle>
         LaunchImage {
-          background-color: #1e1e1e;
+          background-color: #0a0a0a;
+          background-image: url(skins:SeratoLike/classic/style/deejai_loading_bg.png);
+          background-repeat: no-repeat;
+          background-position: center;
         }
         QLabel {
           image: url(skins:SeratoLike/classic/style/mixxx_logo.svg);
           padding: 0;
           margin: 0px 2px 0px 2px;
           border: none;
-          min-width: 162px;
-          max-width: 162px;
-          min-height: 42px;
-          max-height: 42px;
+          min-width: 300px;
+          max-width: 300px;
+          min-height: 200px;
+          max-height: 200px;
         }
         QProgressBar {
           background: url(skins:SeratoLike/classic/style/progressbar_bg.svg);
