@@ -16,6 +16,17 @@ QString styleSheet();
 // Root setup for a DJ App view: object name + scoped style.
 void setupView(QWidget* pView);
 
+// Dan, 2026-10-09 (laptop report): a QScrollArea's own inner content widget
+// (the one passed to QScrollArea::setWidget(), not the scroll area itself
+// and not Qt's internal "qt_scrollarea_viewport") paints its own default
+// palette background - white on that machine - which sat in front of
+// #DJAppView's background and made the whole panel look unstyled (title
+// text still took its dark-theme color via the descendant selector, so it
+// read as near-invisible white-on-white). Call this right after creating
+// that content widget, in every DJ App view that wraps itself in a
+// QScrollArea.
+void setupScrollContent(QWidget* pContent);
+
 // Bold view title ("Analiză", "Sugestii", ...).
 QLabel* newTitle(const QString& text, QWidget* pParent);
 // Secondary grey text.

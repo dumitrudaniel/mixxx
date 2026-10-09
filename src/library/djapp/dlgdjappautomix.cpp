@@ -39,6 +39,7 @@ DlgDJAppAutomix::DlgDJAppAutomix(WLibrary* pParent, DJAppAutopilot* pAutopilot)
     pOuterLayout->addWidget(pScrollArea);
 
     auto* pContent = new QWidget(pScrollArea);
+    djappui::setupScrollContent(pContent);
     pScrollArea->setWidget(pContent);
 
     auto* pLayout = new QVBoxLayout(pContent);

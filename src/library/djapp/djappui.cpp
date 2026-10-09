@@ -18,6 +18,7 @@ QString styleSheet() {
             // object name for that widget, so this targets it reliably.
             "#DJAppView QScrollArea { background-color: #151517; border: none; }"
             "#DJAppView QWidget#qt_scrollarea_viewport { background-color: #151517; }"
+            "#DJAppView QWidget#DJAppViewContent { background-color: #151517; }"
             "#DJAppView QLabel { color: #c8c8c8; }"
             "#DJAppView QLabel#DJAppTitle { color: #eeeeee; font-weight: bold; font-size: 15px; }"
             "#DJAppView QLabel#DJAppMuted { color: #8a8a8a; }"
@@ -55,6 +56,11 @@ void setupView(QWidget* pView) {
     pView->setObjectName(QStringLiteral("DJAppView"));
     pView->setAttribute(Qt::WA_StyledBackground, true);
     pView->setStyleSheet(styleSheet());
+}
+
+void setupScrollContent(QWidget* pContent) {
+    pContent->setObjectName(QStringLiteral("DJAppViewContent"));
+    pContent->setAttribute(Qt::WA_StyledBackground, true);
 }
 
 QLabel* newTitle(const QString& text, QWidget* pParent) {

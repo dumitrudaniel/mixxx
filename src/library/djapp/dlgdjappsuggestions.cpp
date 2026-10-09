@@ -218,6 +218,7 @@ DlgDJAppSuggestions::DlgDJAppSuggestions(
     pOuterLayout->addWidget(pScrollArea);
 
     auto* pContent = new QWidget(pScrollArea);
+    djappui::setupScrollContent(pContent);
     pScrollArea->setWidget(pContent);
 
     auto* pLayout = new QVBoxLayout(pContent);
