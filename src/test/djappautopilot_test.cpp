@@ -139,14 +139,18 @@ TEST(DJAppAutopilotLogicTest, ChoosingWindowOpensExactlyAtTheThreshold) {
     EXPECT_EQ(decide(in).action, Action::ShowCandidates);
 }
 
-TEST(DJAppAutopilotLogicTest, ManualLoadDuringTheWindowTakesPriorityOverThePicker) {
+TEST(DJAppAutopilotLogicTest, PickerStaysUpInsideTheWindowEvenAfterAPick) {
+    // Dan: "nu vreau sa dispara lista, poate ma razgandesc" - a track on the
+    // free deck (his own, a click, or the autopilot's own fallback) does not
+    // close the picker before the deadline; he can still click a different
+    // row to change his mind. showCandidates() itself (not pure decide())
+    // avoids requerying brain.db for the same source+deck.
     Inputs in = baseInputs();
     in.deck1PositionSec = 200.0; // inside the window, before the deadline
     in.deck2Loaded = true; // Dan already put a track there himself
     const Decision d = decide(in);
-    // No picker over Dan's own pick; the deadline will just Trigger later.
-    EXPECT_EQ(d.action, Action::None);
-    EXPECT_EQ(d.otherDeckNumber, 2); // still known, for status purposes
+    EXPECT_EQ(d.action, Action::ShowCandidates);
+    EXPECT_EQ(d.otherDeckNumber, 2);
 }
 
 TEST(DJAppAutopilotLogicTest, OverrideEmptyDeckAlsoAppliesInsideTheWindow) {

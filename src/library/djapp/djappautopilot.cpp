@@ -168,9 +168,12 @@ void DJAppAutopilot::refreshMixOutCache(int deckNumber) {
     m_cachedLocation[i] = location;
     m_cachedRecipeLengthBeats[i] = lengthBeats;
     m_cachedMixOutSec[i] = location.isEmpty() ? std::nullopt : readMixOutSec(location, lengthBeats);
-    // A track changed on either deck: any candidates shown/queried for the
-    // previous combination are stale.
-    if (m_candidatesQueried) {
+    // The source (playing) deck's track changed: a genuinely new cycle, so
+    // any candidates shown for the previous one are stale. A change on the
+    // OTHER deck does NOT reset them here: that is exactly what picking a
+    // candidate does (loads it there), and Dan asked to keep seeing the list
+    // after picking one, in case he changes his mind and clicks another.
+    if (m_candidatesQueried && deckNumber == m_candidatesPlayingDeck) {
         resetCandidates();
     }
 }
@@ -353,7 +356,11 @@ void DJAppAutopilot::loadCandidate(
             << (candidate.allowed ? "(allowed)" : "(risky fallback)");
     m_pickedLabel = candidate.label;
     m_pickedRisky = !candidate.allowed;
-    resetCandidates();
+    // The picker list stays up (Dan: "nu vreau sa dispara lista, poate ma
+    // razgandesc") - he may click a different row before the deadline,
+    // which just reloads the free deck with that one instead. It clears
+    // when the SOURCE track changes (refreshMixOutCache, a genuinely new
+    // cycle) or the deadline is reached and the transition actually fires.
     emit loadTrackToPlayer(candidate.track, targetGroup, false);
     setStatus(Status{StatusKind::Picked, playingDeckNumber, 0.0, candidate.label, m_pickedRisky});
 }

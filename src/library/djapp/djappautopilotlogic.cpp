@@ -77,11 +77,13 @@ Decision decide(const Inputs& in) {
     out.otherDeckNumber = otherDeck;
 
     if (positionSec < deadline) {
-        // Lookahead window open (change 2): offer candidates early, but only
-        // while the other deck is still free -- Dan's own pick (or an
-        // earlier click/auto-pick) always takes priority, nothing to choose
-        // once it's spoken for.
-        out.action = otherLoaded ? Action::None : Action::ShowCandidates;
+        // Lookahead window open (change 2): offer candidates early. Stays
+        // ShowCandidates even after a pick (otherLoaded true) so the picker
+        // keeps showing - Dan may change his mind and click another one
+        // before the deadline; clicking a different row just reloads the
+        // free deck. showCandidates()'s own cache avoids requerying brain.db
+        // every tick for the same source+deck.
+        out.action = Action::ShowCandidates;
         return out;
     }
 
