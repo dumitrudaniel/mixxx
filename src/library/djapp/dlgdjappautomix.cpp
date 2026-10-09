@@ -45,17 +45,10 @@ DlgDJAppAutomix::DlgDJAppAutomix(WLibrary* pParent, DJAppAutopilot* pAutopilot)
     pLayout->setContentsMargins(8, 6, 8, 6);
     pLayout->setSpacing(6);
     pLayout->addWidget(djappui::newTitle(QStringLiteral("Automix"), pContent));
-    pLayout->addWidget(djappui::newMutedLabel(
-            QStringLiteral(
-                    "Variantă minimă (testul de azi, 9 oct, extinsă cu feedback-ul lui Dan): "
-                    "urmărește deck-ul care cântă; cu %1 s înainte de punctul de ieșire "
-                    "(brain.db, <code>mix_points</code>) arată până la 3 variante mai jos -- "
-                    "alege tu una, sau dacă nu alegi nimic, la ieșire încarcă automat cea mai "
-                    "bună (sau cea mai apropiată, dacă nu e nici una ideală) și apasă MIX. "
-                    "Dacă ai pus tu o piesă pe deck-ul liber, rămâne piesa ta și nu arată "
-                    "variante. Dacă apeși tu MIX, nu intervine.")
-                    .arg(static_cast<int>(djapp::autopilot::kLookaheadSec)),
-            pContent));
+    // The explanatory paragraph that used to sit here (lookahead/picker
+    // behavior description) was removed on Dan's request, 2026-10-09: it
+    // took up space he wants for the toggle/status/candidate list instead.
+    // The behavior itself is unchanged -- just no longer explained inline.
 
     m_pToggleButton = new QPushButton(pContent);
     connect(m_pToggleButton, &QPushButton::clicked, this, &DlgDJAppAutomix::slotToggleClicked);

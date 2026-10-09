@@ -194,6 +194,30 @@ TEST(DJAppAutopilotLogicTest, PlanCandidatesTakesAllowedFirstThenFillsWithRisky)
     EXPECT_EQ(plan.riskyCount, 0);
 }
 
+TEST(DJAppAutopilotLogicTest, DefaultCapShowsUpToTenAllowedAndTenRisky) {
+    // 2026-10-09, raised from 3+3 to 10+10 on Dan's live feedback once the
+    // Automix view could scroll. In production, allowedAvailable/
+    // riskyAvailable are themselves already capped at kMaxCandidatesPerList
+    // each (djappautopilot.cpp's request.limit/riskyLimit -- the brain.db
+    // query caps), so these cases use that same realistic ceiling rather
+    // than an arbitrarily larger number. With the default maxCandidates
+    // (kMaxCandidates = 2 * kMaxCandidatesPerList), both lists full gives
+    // exactly up to 10 allowed and up to 10 risky -- the composition rule
+    // (allowed first, risky fills the remainder) is unchanged, it's just
+    // sized so that outcome falls out naturally.
+    CandidatePlan plan = planCandidates(kMaxCandidatesPerList, kMaxCandidatesPerList);
+    EXPECT_EQ(plan.allowedCount, kMaxCandidatesPerList);
+    EXPECT_EQ(plan.riskyCount, kMaxCandidatesPerList);
+
+    // Fewer allowed than the per-list cap: risky still fills up to its own
+    // (query-capped) availability, same rule as the 3+3 case above, just at
+    // the new size -- the total (4 + 10 = 14) stays well under the 20 total
+    // cap, so risky is not truncated by the shared pool here.
+    plan = planCandidates(4, kMaxCandidatesPerList);
+    EXPECT_EQ(plan.allowedCount, 4);
+    EXPECT_EQ(plan.riskyCount, kMaxCandidatesPerList);
+}
+
 TEST(DJAppAutopilotLogicTest, IsRiskyFallbackOnlyWhenAllowedIsEmptyButRiskyIsNot) {
     EXPECT_FALSE(isRiskyFallback(3, 5)); // allowed available: not a fallback
     EXPECT_FALSE(isRiskyFallback(1, 0)); // allowed available, no risky either

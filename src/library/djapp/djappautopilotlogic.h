@@ -41,9 +41,23 @@ std::optional<double> nearestMixOut(const QMap<int, double>& byLength, double le
 // the picker opens moves earlier.
 constexpr double kLookaheadSec = 120.0;
 
-// The up-to-3-candidate picker (change 3): how many rows to pull from brain's
-// allowed and risky suggestion lists.
-constexpr int kMaxCandidates = 3;
+// How many rows to pull from brain's allowed list / risky list each
+// (djappautopilot.cpp's request.limit / request.riskyLimit -- the brain.db
+// query caps, independent of each other). Originally 3+3 (change 3); raised
+// to 10+10 on Dan's live feedback 2026-10-09 once the Automix view could
+// scroll (DlgDJAppAutomix's QScrollArea fix, same night) -- a short list was
+// a limitation of the cramped picker, not a deliberate choice, so once the
+// view could show more there was no reason to still cap it at 3 each.
+constexpr int kMaxCandidatesPerList = 10;
+
+// The picker's total display cap (planCandidates below): allowed rows
+// first, risky fills whatever's left, up to this many in total -- change
+// 3's composition rule, unchanged by the 2026-10-09 raise. Twice
+// kMaxCandidatesPerList so that when both brain.db lists are at least that
+// full, the picker shows the full "up to 10 allowed + up to 10 risky" Dan
+// asked for, without altering the allowed-first-then-risky-fills-remainder
+// rule itself.
+constexpr int kMaxCandidates = 2 * kMaxCandidatesPerList;
 
 enum class Action {
     None, // nothing to do this tick

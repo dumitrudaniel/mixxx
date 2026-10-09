@@ -361,10 +361,11 @@ QList<DJAppAutopilot::Candidate> DJAppAutopilot::queryCandidates(
     DJAppSuggestionRequest request;
     request.location = sourceLocation;
     request.recipe = QString::fromLatin1(DJAppSuggestions::kDefaultRecipe);
-    request.limit = djapp::autopilot::kMaxCandidates;
+    request.limit = djapp::autopilot::kMaxCandidatesPerList;
     // Risky candidates are requested too now (changes 1 & 3): the fallback
-    // when `allowed` is empty, and the rest of the up-to-3 picker list.
-    request.riskyLimit = djapp::autopilot::kMaxCandidates;
+    // when `allowed` is empty, and the rest of the picker list (up to
+    // kMaxCandidatesPerList each, raised from 3 to 10 on 2026-10-09).
+    request.riskyLimit = djapp::autopilot::kMaxCandidatesPerList;
     request.restrictToPool = true;
     request.pool = pool.poolLocations;
     request.exclude = playedToday + excludeOnDecks;

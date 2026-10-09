@@ -8,6 +8,16 @@ namespace djappui {
 QString styleSheet() {
     return QStringLiteral(
             "#DJAppView { background-color: #151517; }"
+            // The QScrollArea added for the laptop-screen fix (2026-10-09,
+            // DlgDJAppSuggestions/DlgDJAppAutomix) sits between #DJAppView
+            // and its content; its viewport is a plain QWidget that is NOT
+            // covered by the "#DJAppView { ... }" rule above (that rule only
+            // paints the #DJAppView widget itself), so it fell back to the
+            // default palette background -- white on this laptop, per Dan's
+            // report. "qt_scrollarea_viewport" is Qt's own fixed internal
+            // object name for that widget, so this targets it reliably.
+            "#DJAppView QScrollArea { background-color: #151517; border: none; }"
+            "#DJAppView QWidget#qt_scrollarea_viewport { background-color: #151517; }"
             "#DJAppView QLabel { color: #c8c8c8; }"
             "#DJAppView QLabel#DJAppTitle { color: #eeeeee; font-weight: bold; font-size: 15px; }"
             "#DJAppView QLabel#DJAppMuted { color: #8a8a8a; }"
