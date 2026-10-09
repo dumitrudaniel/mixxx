@@ -167,14 +167,14 @@
           background-position: center;
         }
         QLabel {
-          image: url(skins:SeratoLike/palemoon/style/mixxx_logo.svg);
+          image: none;
           padding: 0;
           margin: 0px 2px 0px 2px;
           border: none;
-          min-width: 300px;
-          max-width: 300px;
-          min-height: 200px;
-          max-height: 200px;
+          min-width: 0px;
+          max-width: 0px;
+          min-height: 0px;
+          max-height: 0px;
         }
         QProgressBar {
           background: url(skins:SeratoLike/palemoon/style/progressbar_bg.svg);
@@ -298,14 +298,14 @@
           background-position: center;
         }
         QLabel {
-          image: url(skins:SeratoLike/classic/style/mixxx_logo.svg);
+          image: none;
           padding: 0;
           margin: 0px 2px 0px 2px;
           border: none;
-          min-width: 300px;
-          max-width: 300px;
-          min-height: 200px;
-          max-height: 200px;
+          min-width: 0px;
+          max-width: 0px;
+          min-height: 0px;
+          max-height: 0px;
         }
         QProgressBar {
           background: url(skins:SeratoLike/classic/style/progressbar_bg.svg);
