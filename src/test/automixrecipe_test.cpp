@@ -70,16 +70,17 @@ TEST_F(AutomixRecipeTest, Standard8FollowsThePlan) {
     // highs only reach -12 dB; outgoing untouched.
     EXPECT_DOUBLE_EQ(0.0, inMid->valueAt(0.0, 0.0));
     EXPECT_NEAR(1.0, inMid->valueAt(16.0, 0.0), 1e-12);
-    EXPECT_DOUBLE_EQ(0.0, inLow->valueAt(13.9, 0.0));
+    EXPECT_DOUBLE_EQ(0.0, inLow->valueAt(5.9, 0.0));
     EXPECT_NEAR(0.2512, inHigh->valueAt(16.0, 0.0), 1e-4);
-    EXPECT_DOUBLE_EQ(1.0, outLow->valueAt(13.9, 1.0));
+    EXPECT_DOUBLE_EQ(1.0, outLow->valueAt(5.9, 1.0));
     EXPECT_DOUBLE_EQ(1.0, outMid->valueAt(15.9, 1.0));
 
-    // Phase 2 (bars 3.5-4.5, centered on the downbeat of bar 4): bass swaps
-    // in one bar, highs in one bar (Dan, 2026-10-09: the 1-beat swap felt
-    // too abrupt).
-    EXPECT_NEAR(0.0, outLow->valueAt(18.0, 1.0), 1e-12);
-    EXPECT_NEAR(1.0, inLow->valueAt(18.0, 0.0), 1e-12);
+    // Phase 2 (bars 1.5-5.5): bass swaps linearly over 4 bars, ending
+    // exactly when the outgoing track is fully out (Dan, 2026-10-09: the
+    // fast-at-the-end swap felt too abrupt, wanted it more linear and
+    // longer); highs still swap in one bar.
+    EXPECT_NEAR(0.0, outLow->valueAt(22.0, 1.0), 1e-12);
+    EXPECT_NEAR(1.0, inLow->valueAt(22.0, 0.0), 1e-12);
     EXPECT_GT(outHigh->valueAt(17.0, 1.0), 0.0);
     EXPECT_NEAR(0.0, outHigh->valueAt(20.0, 1.0), 1e-12);
     EXPECT_NEAR(1.0, inHigh->valueAt(20.0, 0.0), 1e-12);
@@ -117,15 +118,18 @@ TEST_F(AutomixRecipeTest, OutgoingIsOutBeforeTheLastThird) {
     }
 }
 
-TEST_F(AutomixRecipeTest, Standard8BassSwapIsEqualPower) {
+TEST_F(AutomixRecipeTest, Standard8BassSwapIsLinear) {
+    // Dan (2026-10-09): the bass swap is linear now (not equal-power sin/cos
+    // like before), over bars 1.5-5.5 (beat 6-22), so it no longer feels
+    // "fast at the end."
     const AutomixRecipe& r = *AutomixRecipeBook::builtin().find(QStringLiteral("standard8"));
     const AutomixLane* inLow = findLane(r, AutomixDeckRole::Incoming, AutomixParam::EqLow);
     const AutomixLane* outLow = findLane(r, AutomixDeckRole::Outgoing, AutomixParam::EqLow);
-    for (int i = 0; i <= 10; ++i) {
-        const double beat = 16.0 + i / 10.0;
+    for (int i = 0; i <= 16; ++i) {
+        const double beat = 6.0 + i;
         const double out = outLow->valueAt(beat, 1.0);
         const double in = inLow->valueAt(beat, 0.0);
-        EXPECT_NEAR(1.0, out * out + in * in, 1e-9) << "beat=" << beat;
+        EXPECT_NEAR(1.0, out + in, 1e-9) << "beat=" << beat;
     }
 }
 
@@ -135,7 +139,7 @@ TEST_F(AutomixRecipeTest, LanesRampFromTheKnobsCurrentValue) {
     const AutomixLane* inMid = findLane(r, AutomixDeckRole::Incoming, AutomixParam::EqMid);
     // Dan left the outgoing bass at 0.8: it holds there, no jump to 1.0.
     EXPECT_DOUBLE_EQ(0.8, outLow->valueAt(0.0, 0.8));
-    EXPECT_DOUBLE_EQ(0.8, outLow->valueAt(10.0, 0.8));
+    EXPECT_DOUBLE_EQ(0.8, outLow->valueAt(5.0, 0.8));
     // Incoming mids already half up: the ramp starts from 0.5.
     EXPECT_DOUBLE_EQ(0.5, inMid->valueAt(0.0, 0.5));
     EXPECT_GT(inMid->valueAt(4.0, 0.5), 0.5);
