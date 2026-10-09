@@ -116,6 +116,88 @@ TEST(DJAppAutopilotLogicTest, OverrideEmptyDeckTreatsAStaleTrackAsEmpty) {
     EXPECT_EQ(d.otherDeckNumber, 2);
 }
 
+TEST(DJAppAutopilotLogicTest, EntersChoosingInsideLookaheadWindow) {
+    Inputs in = baseInputs();
+    in.deck2Loaded = false; // other deck still free
+    // mix-out is at 90.0, lookahead is 45s -> window opens at 45.0.
+    in.deck1PositionSec = 50.0;
+    const Decision d = decide(in);
+    EXPECT_EQ(d.action, Action::ShowCandidates);
+    EXPECT_EQ(d.playingDeckNumber, 1);
+    EXPECT_EQ(d.otherDeckNumber, 2);
+}
+
+TEST(DJAppAutopilotLogicTest, StaysWatchingRightBeforeTheLookaheadWindow) {
+    Inputs in = baseInputs();
+    in.deck1PositionSec = 44.9; // window opens at 45.0
+    EXPECT_EQ(decide(in).action, Action::None);
+}
+
+TEST(DJAppAutopilotLogicTest, ChoosingWindowOpensExactlyAtTheThreshold) {
+    Inputs in = baseInputs();
+    in.deck1PositionSec = 45.0; // mixOutSec(90) - kLookaheadSec(45)
+    EXPECT_EQ(decide(in).action, Action::ShowCandidates);
+}
+
+TEST(DJAppAutopilotLogicTest, ManualLoadDuringTheWindowTakesPriorityOverThePicker) {
+    Inputs in = baseInputs();
+    in.deck1PositionSec = 50.0; // inside the window, before the deadline
+    in.deck2Loaded = true; // Dan already put a track there himself
+    const Decision d = decide(in);
+    // No picker over Dan's own pick; the deadline will just Trigger later.
+    EXPECT_EQ(d.action, Action::None);
+    EXPECT_EQ(d.otherDeckNumber, 2); // still known, for status purposes
+}
+
+TEST(DJAppAutopilotLogicTest, OverrideEmptyDeckAlsoAppliesInsideTheWindow) {
+    Inputs in = baseInputs();
+    in.deck1PositionSec = 50.0;
+    in.deck2Loaded = true; // stale track from a transition that just finished
+    in.overrideEmptyDeck = 2;
+    const Decision d = decide(in);
+    EXPECT_EQ(d.action, Action::ShowCandidates);
+    EXPECT_EQ(d.otherDeckNumber, 2);
+}
+
+TEST(DJAppAutopilotLogicTest, DeadlineReachedWithNoChoiceAutoPicksTop) {
+    Inputs in = baseInputs();
+    in.deck1PositionSec = 90.0; // exactly at mixOutSec: the deadline
+    in.deck2Loaded = false; // Dan never clicked a candidate
+    const Decision d = decide(in);
+    EXPECT_EQ(d.action, Action::PickAndLoad);
+    EXPECT_EQ(d.otherDeckNumber, 2);
+}
+
+TEST(DJAppAutopilotLogicTest, PlanCandidatesTakesAllowedFirstThenFillsWithRisky) {
+    // Plenty of both: capped at maxCandidates, allowed preferred.
+    CandidatePlan plan = planCandidates(5, 5, 3);
+    EXPECT_EQ(plan.allowedCount, 3);
+    EXPECT_EQ(plan.riskyCount, 0);
+
+    // Fewer than 3 allowed: risky fills the remainder.
+    plan = planCandidates(1, 5, 3);
+    EXPECT_EQ(plan.allowedCount, 1);
+    EXPECT_EQ(plan.riskyCount, 2);
+
+    // No allowed at all: risky fallback fills every slot it can.
+    plan = planCandidates(0, 2, 3);
+    EXPECT_EQ(plan.allowedCount, 0);
+    EXPECT_EQ(plan.riskyCount, 2);
+
+    // Nothing at all: the true dead end.
+    plan = planCandidates(0, 0, 3);
+    EXPECT_EQ(plan.allowedCount, 0);
+    EXPECT_EQ(plan.riskyCount, 0);
+}
+
+TEST(DJAppAutopilotLogicTest, IsRiskyFallbackOnlyWhenAllowedIsEmptyButRiskyIsNot) {
+    EXPECT_FALSE(isRiskyFallback(3, 5)); // allowed available: not a fallback
+    EXPECT_FALSE(isRiskyFallback(1, 0)); // allowed available, no risky either
+    EXPECT_TRUE(isRiskyFallback(0, 1)); // Morango do Nordeste's real case tonight
+    EXPECT_TRUE(isRiskyFallback(0, 15));
+    EXPECT_FALSE(isRiskyFallback(0, 0)); // the true dead end, not a fallback
+}
+
 TEST(DJAppAutopilotLogicTest, SymmetricForDeck2Playing) {
     Inputs in;
     in.enabled = true;
@@ -143,6 +225,16 @@ TEST(DJAppAutopilotLogicTest, StatusTextIsRomanianAndReadable) {
     const QString picked =
             statusText(Status{StatusKind::Picked, 1, 0.0, QStringLiteral("Livongh")});
     EXPECT_TRUE(picked.contains(QStringLiteral("Livongh")));
+
+    // Change 1: a risky fallback pick is flagged, not silently used.
+    const QString riskyPicked = statusText(
+            Status{StatusKind::Picked, 1, 0.0, QStringLiteral("Morango do Nordeste"), true});
+    EXPECT_TRUE(riskyPicked.contains(QStringLiteral("Morango do Nordeste")));
+    EXPECT_TRUE(riskyPicked.contains(QStringLiteral("riscant")));
+
+    const QString choosing = statusText(Status{StatusKind::Choosing, 2, 125.0, QString()});
+    EXPECT_TRUE(choosing.contains(QStringLiteral("deck 2")));
+    EXPECT_TRUE(choosing.contains(QStringLiteral("2:05")));
 }
 
 } // namespace

@@ -2,10 +2,12 @@
 
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLayoutItem>
 #include <QPushButton>
 #include <QVBoxLayout>
 
 #include "library/djapp/djappautopilot.h"
+#include "library/djapp/djappsuggestions.h"
 #include "library/djapp/djappui.h"
 #include "moc_dlgdjappautomix.cpp"
 #include "widget/wlibrary.h"
@@ -14,7 +16,9 @@ DlgDJAppAutomix::DlgDJAppAutomix(WLibrary* pParent, DJAppAutopilot* pAutopilot)
         : QWidget(pParent),
           m_pAutopilot(pAutopilot),
           m_pToggleButton(nullptr),
-          m_pStatusLabel(nullptr) {
+          m_pStatusLabel(nullptr),
+          m_pCandidatesSection(nullptr),
+          m_pCandidatesLayout(nullptr) {
     djappui::setupView(this);
     auto* pLayout = new QVBoxLayout(this);
     pLayout->setContentsMargins(8, 6, 8, 6);
@@ -22,10 +26,14 @@ DlgDJAppAutomix::DlgDJAppAutomix(WLibrary* pParent, DJAppAutopilot* pAutopilot)
     pLayout->addWidget(djappui::newTitle(QStringLiteral("Automix"), this));
     pLayout->addWidget(djappui::newMutedLabel(
             QStringLiteral(
-                    "Variantă minimă (testul de azi, 9 oct): urmărește deck-ul care cântă, "
-                    "iar la punctul de ieșire (brain.db, <code>mix_points</code>) încarcă cea "
-                    "mai bună sugestie pe deck-ul liber (fără play) și apasă MIX. Dacă ai pus tu "
-                    "o piesă pe deck-ul liber, rămâne piesa ta. Dacă apeși tu MIX, nu intervine."),
+                    "Variantă minimă (testul de azi, 9 oct, extinsă cu feedback-ul lui Dan): "
+                    "urmărește deck-ul care cântă; cu %1 s înainte de punctul de ieșire "
+                    "(brain.db, <code>mix_points</code>) arată până la 3 variante mai jos -- "
+                    "alege tu una, sau dacă nu alegi nimic, la ieșire încarcă automat cea mai "
+                    "bună (sau cea mai apropiată, dacă nu e nici una ideală) și apasă MIX. "
+                    "Dacă ai pus tu o piesă pe deck-ul liber, rămâne piesa ta și nu arată "
+                    "variante. Dacă apeși tu MIX, nu intervine.")
+                    .arg(static_cast<int>(djapp::autopilot::kLookaheadSec)),
             this));
 
     m_pToggleButton = new QPushButton(this);
@@ -37,6 +45,14 @@ DlgDJAppAutomix::DlgDJAppAutomix(WLibrary* pParent, DJAppAutopilot* pAutopilot)
 
     m_pStatusLabel = djappui::newMutedLabel(QStringLiteral("oprit"), this);
     pLayout->addWidget(m_pStatusLabel);
+
+    m_pCandidatesSection = new QWidget(this);
+    m_pCandidatesLayout = new QVBoxLayout(m_pCandidatesSection);
+    m_pCandidatesLayout->setContentsMargins(0, 0, 0, 0);
+    m_pCandidatesLayout->setSpacing(4);
+    m_pCandidatesSection->setVisible(false);
+    pLayout->addWidget(m_pCandidatesSection);
+
     pLayout->addStretch(1);
 
     const bool enabled = m_pAutopilot ? m_pAutopilot->isEnabled() : false;
@@ -51,6 +67,10 @@ DlgDJAppAutomix::DlgDJAppAutomix(WLibrary* pParent, DJAppAutopilot* pAutopilot)
                 &DJAppAutopilot::statusTextChanged,
                 this,
                 &DlgDJAppAutomix::slotStatusTextChanged);
+        connect(m_pAutopilot.data(),
+                &DJAppAutopilot::candidatesChanged,
+                this,
+                &DlgDJAppAutomix::slotCandidatesChanged);
     } else {
         m_pToggleButton->setEnabled(false);
     }
@@ -74,6 +94,49 @@ void DlgDJAppAutomix::slotEnabledChanged(bool enabled) {
 
 void DlgDJAppAutomix::slotStatusTextChanged(const QString& text) {
     m_pStatusLabel->setText(text);
+}
+
+void DlgDJAppAutomix::slotCandidatesChanged(const QList<DJAppAutopilotCandidate>& candidates) {
+    rebuildCandidates(candidates);
+}
+
+void DlgDJAppAutomix::rebuildCandidates(const QList<DJAppAutopilotCandidate>& candidates) {
+    QLayoutItem* pItem;
+    while ((pItem = m_pCandidatesLayout->takeAt(0)) != nullptr) {
+        delete pItem->widget();
+        delete pItem;
+    }
+    m_pCandidatesSection->setVisible(!candidates.isEmpty());
+    if (candidates.isEmpty()) {
+        return;
+    }
+    // Same allowed/risky split dlgdjappsuggestions.cpp uses (two sections,
+    // the risky one introduced by a muted separator label), just a 1-3 row
+    // list instead of a full table (change 3).
+    bool shownRiskySeparator = false;
+    for (int i = 0; i < candidates.size(); ++i) {
+        const DJAppAutopilotCandidate& candidate = candidates.at(i);
+        if (!candidate.allowed && !shownRiskySeparator) {
+            m_pCandidatesLayout->addWidget(djappui::newMutedLabel(
+                    QStringLiteral("── riscant (nicio opțiune ideală) ──"),
+                    m_pCandidatesSection));
+            shownRiskySeparator = true;
+        }
+        const QString text = QStringLiteral("%1  ·  %2  ·  %3 BPM  ·  %4")
+                                      .arg(candidate.label,
+                                              DJAppSuggestions::scoreText(candidate.score),
+                                              DJAppSuggestions::stepText(candidate.stepBpm),
+                                              candidate.keyVerdict);
+        auto* pButton = new QPushButton(text, m_pCandidatesSection);
+        pButton->setFlat(true);
+        pButton->setStyleSheet(QStringLiteral("text-align: left; padding: 3px 6px;"));
+        connect(pButton, &QPushButton::clicked, this, [this, i]() {
+            if (m_pAutopilot) {
+                m_pAutopilot->chooseCandidate(i);
+            }
+        });
+        m_pCandidatesLayout->addWidget(pButton);
+    }
 }
 
 void DlgDJAppAutomix::onShow() {

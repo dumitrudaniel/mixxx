@@ -33,11 +33,40 @@ QMap<int, double> parseMixOutMap(const QString& json);
 // brain/store/mixpoints.py MixPointsRow.mix_in_for).
 std::optional<double> nearestMixOut(const QMap<int, double>& byLength, double lengthBeats);
 
+// How long before a track's mix-out point Dan gets to see candidates (change
+// 2, live feedback 2026-10-09: "vreau să știu ce urmează mai din timp, nu în
+// ultimul moment"). The actual load/trigger timing is unchanged (still
+// at/after mix_out_sec); only when the picker opens moves earlier.
+constexpr double kLookaheadSec = 45.0;
+
+// The up-to-3-candidate picker (change 3): how many rows to pull from brain's
+// allowed and risky suggestion lists.
+constexpr int kMaxCandidates = 3;
+
 enum class Action {
     None, // nothing to do this tick
+    ShowCandidates, // inside the lookahead window, other deck empty: offer up to kMaxCandidates picks, load nothing yet
     PickAndLoad, // past mix-out, other deck empty: pick a suggestion, load it, then trigger MIX
     Trigger, // past mix-out, other deck already has a track: just tap MIX
 };
+
+// How many of each list to take for the picker / for the deadline auto-pick
+// (allowed first, risky only fills what's left) -- change 3's composition
+// rule. Pure function of the counts brain.db's query already returned, so
+// it is testable without a live suggestion query.
+struct CandidatePlan {
+    int allowedCount = 0;
+    int riskyCount = 0;
+};
+CandidatePlan planCandidates(
+        int allowedAvailable, int riskyAvailable, int maxCandidates = kMaxCandidates);
+
+// True exactly when the only thing on offer is a risky pick (change 1: Dan
+// never ends up with nothing loaded, but a risky-only pick must be flagged,
+// not used silently). False both when an allowed candidate exists and when
+// there is truly nothing at all (that dead end is `candidates.isEmpty()`,
+// checked by the caller).
+bool isRiskyFallback(int allowedAvailable, int riskyAvailable);
 
 struct Inputs {
     bool enabled = false;
@@ -74,9 +103,10 @@ enum class StatusKind {
     NoPlayingDeck, // on, but neither deck is playing
     BothPlaying, // on, but both decks are playing (ambiguous, wait)
     NoMixData, // the playing deck's track has no mix_points row yet
-    Watching, // on, watching a deck, waiting to reach its mix-out point
-    Picking, // past mix-out, no suggestion found (or no match in the library)
-    Picked, // a suggestion was loaded onto the other deck
+    Watching, // on, watching a deck, waiting to reach the lookahead window
+    Choosing, // inside the lookahead window, candidates shown, waiting for a click or the deadline
+    Picking, // past mix-out (or querying for the picker), no candidate at all -- the true dead end
+    Picked, // a candidate was loaded onto the other deck (by Dan's click, or the deadline default)
     Armed, // [AutomixTransition],state == 1 (MIX armed, by Dan or by autopilot)
     Running, // [AutomixTransition],state == 2 (transition in progress)
 };
@@ -86,6 +116,9 @@ struct Status {
     int deckNumber = 0;
     double mixOutSec = 0.0;
     QString trackText;
+    // Picked only: the loaded candidate was a risky fallback (change 1), not
+    // an ideal match -- flagged, not silently used.
+    bool risky = false;
 };
 
 // "urmăresc deck 1, iese la 3:12" etc. (Romanian, matches the other DJ App

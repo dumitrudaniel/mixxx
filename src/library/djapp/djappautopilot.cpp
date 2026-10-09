@@ -87,6 +87,13 @@ void DJAppAutopilot::setEnabled(bool enabled) {
     }
 }
 
+void DJAppAutopilot::chooseCandidate(int index) {
+    if (index < 0 || index >= m_candidates.size()) {
+        return;
+    }
+    loadCandidate(m_candidatesPlayingDeck, m_candidatesOtherDeck, m_candidates.at(index));
+}
+
 QString DJAppAutopilot::brainDbPath() const {
     return BrainDbReader::configuredPath(
             m_pConfig->getValueString(ConfigKey(kDJAppGroup, QStringLiteral("BrainDb"))));
@@ -163,10 +170,27 @@ void DJAppAutopilot::refreshMixOutCache(int deckNumber) {
     m_cachedLocation[i] = location;
     m_cachedRecipeLengthBeats[i] = lengthBeats;
     m_cachedMixOutSec[i] = location.isEmpty() ? std::nullopt : readMixOutSec(location, lengthBeats);
+    // A track changed on either deck: any candidates shown/queried for the
+    // previous combination are stale.
+    if (m_candidatesQueried) {
+        resetCandidates();
+    }
 }
 
 void DJAppAutopilot::setStatus(const Status& status) {
     emit statusTextChanged(statusText(status));
+}
+
+void DJAppAutopilot::resetCandidates() {
+    const bool hadCandidates = !m_candidates.isEmpty();
+    m_candidates.clear();
+    m_candidatesQueried = false;
+    m_candidatesSourceLocation.clear();
+    m_candidatesPlayingDeck = 0;
+    m_candidatesOtherDeck = 0;
+    if (hadCandidates) {
+        emit candidatesChanged({});
+    }
 }
 
 void DJAppAutopilot::triggerMix(int playingDeckNumber) {
@@ -176,6 +200,9 @@ void DJAppAutopilot::triggerMix(int playingDeckNumber) {
     pTrigger->set(0.0);
     m_overrideEmptyDeck = 0;
     m_awaitingLoadDeck = 0;
+    m_pickedLabel.clear();
+    m_pickedRisky = false;
+    resetCandidates();
 }
 
 namespace {
@@ -210,20 +237,35 @@ LibraryPoolRead readLibraryPool(mixxx::DbConnectionPoolPtr pPool) {
 }
 } // namespace
 
-void DJAppAutopilot::pickAndLoad(int playingDeckNumber, int otherDeckNumber) {
+// static
+QList<DJAppAutopilotCandidate> DJAppAutopilot::toDisplayList(const QList<Candidate>& candidates) {
+    QList<DJAppAutopilotCandidate> out;
+    out.reserve(candidates.size());
+    for (const Candidate& c : candidates) {
+        out.append(DJAppAutopilotCandidate{c.label, c.score, c.stepBpm, c.keyVerdict, c.allowed});
+    }
+    return out;
+}
+
+QList<DJAppAutopilot::Candidate> DJAppAutopilot::queryCandidates(
+        int playingDeckNumber, int otherDeckNumber, bool* pRiskyFallback) {
+    QList<Candidate> out;
+    if (pRiskyFallback) {
+        *pRiskyFallback = false;
+    }
     const TrackPointer pSource = PlayerInfo::instance().getTrackInfo(
             PlayerManager::groupForDeck(playingDeckNumber - 1));
     if (!pSource) {
-        return;
+        return out;
     }
     const QString sourceLocation = pSource->getLocation();
 
     // Brief, bounded wait (a few dozen rows, same read Analiza does): simpler
     // and safer right now than restructuring this tick into an async
-    // continuation, and it only runs at a mix-out point, not every tick.
+    // continuation, and it only runs inside the lookahead window / at the
+    // deadline, not every tick.
     const LibraryPoolRead pool =
             QtConcurrent::run(&readLibraryPool, m_pLibrary->dbConnectionPool()).result();
-    const QStringList& poolLocations = pool.poolLocations;
     const QHash<QString, DJAppLibraryTrack>& libraryByKey = pool.libraryByKey;
     const QStringList& playedToday = pool.playedToday;
 
@@ -239,42 +281,119 @@ void DJAppAutopilot::pickAndLoad(int playingDeckNumber, int otherDeckNumber) {
     DJAppSuggestionRequest request;
     request.location = sourceLocation;
     request.recipe = QString::fromLatin1(DJAppSuggestions::kDefaultRecipe);
-    request.limit = 5;
-    request.riskyLimit = 0;
+    request.limit = djapp::autopilot::kMaxCandidates;
+    // Risky candidates are requested too now (changes 1 & 3): the fallback
+    // when `allowed` is empty, and the rest of the up-to-3 picker list.
+    request.riskyLimit = djapp::autopilot::kMaxCandidates;
     request.restrictToPool = true;
-    request.pool = poolLocations;
+    request.pool = pool.poolLocations;
     request.exclude = playedToday + excludeOnDecks;
 
     const DJAppSuggestionResult result = DJAppSuggestions::query(brainDbPath(), request);
-    if (result.allowed.isEmpty()) {
-        setStatus(Status{StatusKind::Picking, playingDeckNumber, 0.0, QString()});
-        return;
+    const djapp::autopilot::CandidatePlan plan = djapp::autopilot::planCandidates(
+            result.allowed.size(), result.risky.size());
+    if (pRiskyFallback) {
+        *pRiskyFallback = djapp::autopilot::isRiskyFallback(
+                result.allowed.size(), result.risky.size());
     }
 
-    const DJAppSuggestion& best = result.allowed.first();
-    const QString matchLocation = best.poolLocation.isEmpty() ? best.location : best.poolLocation;
-    const auto it = libraryByKey.constFind(BrainDbReader::locationKey(matchLocation));
-    if (it == libraryByKey.constEnd()) {
-        setStatus(Status{StatusKind::Picking, playingDeckNumber, 0.0, QString()});
-        return;
-    }
+    auto resolve = [&](const DJAppSuggestion& suggestion, bool allowed) -> std::optional<Candidate> {
+        const QString matchLocation =
+                suggestion.poolLocation.isEmpty() ? suggestion.location : suggestion.poolLocation;
+        const auto it = libraryByKey.constFind(BrainDbReader::locationKey(matchLocation));
+        if (it == libraryByKey.constEnd()) {
+            return std::nullopt;
+        }
+        const TrackPointer pTrack = m_pLibrary->trackCollectionManager()->getTrackById(
+                TrackId(QVariant(it.value().id)));
+        if (!pTrack) {
+            return std::nullopt;
+        }
+        Candidate c;
+        c.track = pTrack;
+        c.label = trackLabel(it.value());
+        c.score = suggestion.score;
+        c.stepBpm = suggestion.stepBpm;
+        c.keyVerdict = DJAppSuggestions::keyText(result.sourceCamelot, suggestion);
+        c.allowed = allowed;
+        return c;
+    };
 
-    const TrackPointer pTrack = m_pLibrary->trackCollectionManager()->getTrackById(
-            TrackId(QVariant(it.value().id)));
-    if (!pTrack) {
-        setStatus(Status{StatusKind::Picking, playingDeckNumber, 0.0, QString()});
-        return;
+    for (int i = 0; i < plan.allowedCount && i < result.allowed.size(); ++i) {
+        if (auto c = resolve(result.allowed.at(i), true)) {
+            out.append(*c);
+        }
     }
+    for (int i = 0; i < plan.riskyCount && i < result.risky.size(); ++i) {
+        if (auto c = resolve(result.risky.at(i), false)) {
+            out.append(*c);
+        }
+    }
+    return out;
+}
 
+void DJAppAutopilot::loadCandidate(
+        int playingDeckNumber, int otherDeckNumber, const Candidate& candidate) {
     m_awaitingLoadDeck = otherDeckNumber;
     if (m_overrideEmptyDeck == otherDeckNumber) {
         m_overrideEmptyDeck = 0;
     }
     const QString targetGroup = PlayerManager::groupForDeck(otherDeckNumber - 1);
-    qInfo() << "DJ App autopilot: loading" << trackLabel(it.value()) << "onto" << targetGroup
-            << "for deck" << playingDeckNumber << "mixing out";
-    emit loadTrackToPlayer(pTrack, targetGroup, false);
-    setStatus(Status{StatusKind::Picked, playingDeckNumber, 0.0, trackLabel(it.value())});
+    qInfo() << "DJ App autopilot: loading" << candidate.label << "onto" << targetGroup
+            << "for deck" << playingDeckNumber << "mixing out"
+            << (candidate.allowed ? "(allowed)" : "(risky fallback)");
+    m_pickedLabel = candidate.label;
+    m_pickedRisky = !candidate.allowed;
+    resetCandidates();
+    emit loadTrackToPlayer(candidate.track, targetGroup, false);
+    setStatus(Status{StatusKind::Picked, playingDeckNumber, 0.0, candidate.label, m_pickedRisky});
+}
+
+void DJAppAutopilot::showCandidates(int playingDeckNumber, int otherDeckNumber) {
+    const TrackPointer pSource = PlayerInfo::instance().getTrackInfo(
+            PlayerManager::groupForDeck(playingDeckNumber - 1));
+    const QString sourceLocation = pSource ? pSource->getLocation() : QString();
+    if (sourceLocation.isEmpty()) {
+        return;
+    }
+    const bool sameTarget = m_candidatesQueried &&
+            m_candidatesSourceLocation == sourceLocation &&
+            m_candidatesOtherDeck == otherDeckNumber;
+    if (!sameTarget) {
+        // The risky-fallback flag matters for the deadline's silent default
+        // pick (pickAndLoad); the picker shows allowed vs. risky per row
+        // instead (DJAppAutopilotCandidate::allowed), so it is not needed here.
+        m_candidates = queryCandidates(playingDeckNumber, otherDeckNumber, nullptr);
+        m_candidatesSourceLocation = sourceLocation;
+        m_candidatesPlayingDeck = playingDeckNumber;
+        m_candidatesOtherDeck = otherDeckNumber;
+        m_candidatesQueried = true;
+        emit candidatesChanged(toDisplayList(m_candidates));
+    }
+    if (m_candidates.isEmpty()) {
+        // Allowed AND risky both empty: the one true dead end (change 1).
+        setStatus(Status{StatusKind::Picking, playingDeckNumber, 0.0, QString()});
+        return;
+    }
+    setStatus(Status{StatusKind::Choosing,
+            playingDeckNumber,
+            m_cachedMixOutSec[playingDeckNumber - 1].value_or(0.0),
+            QString()});
+}
+
+void DJAppAutopilot::pickAndLoad(int playingDeckNumber, int otherDeckNumber) {
+    bool riskyFallback = false;
+    const QList<Candidate> candidates =
+            queryCandidates(playingDeckNumber, otherDeckNumber, &riskyFallback);
+    if (candidates.isEmpty()) {
+        // The one true dead end (change 1): neither an allowed nor a risky
+        // candidate exists anywhere in the pool.
+        setStatus(Status{StatusKind::Picking, playingDeckNumber, 0.0, QString()});
+        return;
+    }
+    // Best allowed if any, else the best risky one -- flagged by
+    // loadCandidate() via candidates.first().allowed (change 1 & 4).
+    loadCandidate(playingDeckNumber, otherDeckNumber, candidates.first());
 }
 
 void DJAppAutopilot::tick() {
@@ -299,6 +418,9 @@ void DJAppAutopilot::tick() {
     m_lastEngineState = engineState;
 
     if (!enabled) {
+        resetCandidates();
+        m_pickedLabel.clear();
+        m_pickedRisky = false;
         setStatus(Status{StatusKind::Off, 0, 0.0, QString()});
         return;
     }
@@ -344,13 +466,38 @@ void DJAppAutopilot::tick() {
     const Decision decision = decide(in);
     switch (decision.action) {
     case Action::None:
-        setStatus(Status{StatusKind::Watching, playingDeck, mixOutSec.value(), QString()});
+        if (decision.otherDeckNumber == 0) {
+            // Far from the exit point yet (or just finished a cycle): a
+            // fresh watch, so anything the picker/auto-pick showed for the
+            // previous track no longer applies.
+            resetCandidates();
+            m_pickedLabel.clear();
+            m_pickedRisky = false;
+            setStatus(Status{StatusKind::Watching, playingDeck, mixOutSec.value(), QString()});
+        } else if (!m_pickedLabel.isEmpty()) {
+            // Inside the lookahead window, other deck already spoken for by
+            // a click or a previous autopilot pick: nothing more to do
+            // before the deadline triggers MIX.
+            setStatus(Status{StatusKind::Picked, playingDeck, 0.0, m_pickedLabel, m_pickedRisky});
+        } else {
+            // Spoken for by Dan's own manual load (change 3's precedence
+            // rule): leave it alone, same as the deadline's Trigger branch.
+            setStatus(Status{StatusKind::Watching, playingDeck, mixOutSec.value(), QString()});
+        }
+        return;
+    case Action::ShowCandidates:
+        if (m_awaitingLoadDeck == decision.otherDeckNumber) {
+            // A click (or the deadline, momentarily) already asked for a
+            // load on that deck; wait for it to land instead of
+            // re-querying brain.db every tick.
+            setStatus(Status{StatusKind::Picked, playingDeck, 0.0, m_pickedLabel, m_pickedRisky});
+            return;
+        }
+        showCandidates(decision.playingDeckNumber, decision.otherDeckNumber);
         return;
     case Action::PickAndLoad:
         if (m_awaitingLoadDeck == decision.otherDeckNumber) {
-            // Already asked for a load on that deck; wait for it to land
-            // instead of re-querying brain.db every tick.
-            setStatus(Status{StatusKind::Picked, playingDeck, 0.0, QString()});
+            setStatus(Status{StatusKind::Picked, playingDeck, 0.0, m_pickedLabel, m_pickedRisky});
             return;
         }
         pickAndLoad(decision.playingDeckNumber, decision.otherDeckNumber);

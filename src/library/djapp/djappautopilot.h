@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QList>
 #include <QObject>
 #include <QString>
 #include <QTimer>
@@ -13,6 +14,17 @@
 #include "util/class.h"
 
 class Library;
+
+// A picker row (change 3): display-only, no TrackPointer -- clicking a row
+// in the widget calls DJAppAutopilot::chooseCandidate(index), the autopilot
+// keeps the actual track.
+struct DJAppAutopilotCandidate {
+    QString label;
+    double score = 0.0;
+    double stepBpm = 0.0;
+    QString keyVerdict;
+    bool allowed = false; // false = risky (change 1/3: flagged, not hidden)
+};
 
 // DJ App automix autopilot (docs/plan-ui-integrare.md §6 Etapa 5, cut down
 // for a quick live test, 2026-10-09). OFF by default. When ON, it fills the
@@ -46,12 +58,19 @@ class DJAppAutopilot : public QObject {
   public slots:
     // "PORNEȘTE AUTOMIX" / "OPREȘTE AUTOMIX" toggle button.
     void setEnabled(bool enabled);
+    // Dan clicked candidate `index` in the picker (change 3): load it onto
+    // the free deck right away, without waiting for the deadline.
+    void chooseCandidate(int index);
 
   signals:
     void statusTextChanged(const QString& text);
     void enabledChanged(bool enabled);
     // Forwarded by DJAppFeature exactly like DlgDJAppSuggestions::loadTrackToPlayer.
     void loadTrackToPlayer(TrackPointer pTrack, const QString& group, bool play);
+    // Up to kMaxCandidates rows for the picker (change 3); empty clears it
+    // (a click landed, the deadline's default pick landed, or the cycle
+    // moved on to a different track).
+    void candidatesChanged(const QList<DJAppAutopilotCandidate>& candidates);
 
   private slots:
     void tick();
@@ -72,9 +91,39 @@ class DJAppAutopilot : public QObject {
     double activeRecipeLengthBeats() const;
     std::optional<double> readMixOutSec(const QString& location, double lengthBeats) const;
 
+    // A resolved candidate (change 1/3/4): the actual track plus the same
+    // display fields as DJAppAutopilotCandidate.
+    struct Candidate {
+        TrackPointer track;
+        QString label;
+        double score = 0.0;
+        double stepBpm = 0.0;
+        QString keyVerdict;
+        bool allowed = false;
+    };
+    static QList<DJAppAutopilotCandidate> toDisplayList(const QList<Candidate>& candidates);
+
+    // Queries brain.db for up to kMaxCandidates candidates after
+    // playingDeckNumber's track, allowed first then risky filling the rest
+    // (djapp::autopilot::planCandidates). Empty = the true dead end (change
+    // 1's "nicio sugestie disponibilă" case); *pRiskyFallback is set when the
+    // list is non-empty but contains no allowed candidate at all.
+    QList<Candidate> queryCandidates(
+            int playingDeckNumber, int otherDeckNumber, bool* pRiskyFallback);
+    // Lookahead window (change 2/3): query once per (track, other deck) and
+    // show the picker; a no-op on later ticks while the same candidates are
+    // still showing.
+    void showCandidates(int playingDeckNumber, int otherDeckNumber);
+    // Loads `candidate` onto otherDeckNumber right away -- the shared path
+    // for both a Dan click and the deadline's default pick.
+    void loadCandidate(int playingDeckNumber, int otherDeckNumber, const Candidate& candidate);
+
     void pickAndLoad(int playingDeckNumber, int otherDeckNumber);
     void triggerMix(int playingDeckNumber);
     void setStatus(const djapp::autopilot::Status& status);
+    // Clears whatever the picker/auto-pick last showed (new watch cycle,
+    // off, or a transition just completed).
+    void resetCandidates();
 
     QString brainDbPath() const;
 
@@ -101,6 +150,20 @@ class DJAppAutopilot : public QObject {
     int m_overrideEmptyDeck = 0;
     int m_awaitingLoadDeck = 0;
     bool m_lastEnabled = false;
+
+    // Picker cache (change 2/3): avoids re-querying brain.db every 500 ms
+    // tick while the same lookahead window is open.
+    QList<Candidate> m_candidates;
+    QString m_candidatesSourceLocation;
+    int m_candidatesPlayingDeck = 0;
+    int m_candidatesOtherDeck = 0;
+    bool m_candidatesQueried = false;
+
+    // What the status line shows for StatusKind::Picked (change 1's risky
+    // flag, surfaced in the UI too), set by loadCandidate(), cleared by
+    // resetCandidates().
+    QString m_pickedLabel;
+    bool m_pickedRisky = false;
 
     DISALLOW_COPY_AND_ASSIGN(DJAppAutopilot);
 };

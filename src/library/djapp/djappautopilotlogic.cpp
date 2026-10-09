@@ -3,6 +3,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -61,17 +62,47 @@ Decision decide(const Inputs& in) {
     if (!mixOutSec.has_value()) {
         return out;
     }
-    if (positionSec < mixOutSec.value()) {
+    const double deadline = mixOutSec.value();
+    const double lookaheadStart = deadline - kLookaheadSec;
+    if (positionSec < lookaheadStart) {
+        // Too early even to start showing candidates: Watching.
         return out;
     }
+
     const int otherDeck = playingDeck == 1 ? 2 : 1;
     const bool otherLoaded = (playingDeck == 1 ? in.deck2Loaded : in.deck1Loaded) &&
             in.overrideEmptyDeck != otherDeck;
 
     out.playingDeckNumber = playingDeck;
     out.otherDeckNumber = otherDeck;
+
+    if (positionSec < deadline) {
+        // Lookahead window open (change 2): offer candidates early, but only
+        // while the other deck is still free -- Dan's own pick (or an
+        // earlier click/auto-pick) always takes priority, nothing to choose
+        // once it's spoken for.
+        out.action = otherLoaded ? Action::None : Action::ShowCandidates;
+        return out;
+    }
+
+    // Deadline reached: load the default pick if Dan hasn't chosen one
+    // (change 4), or trigger the transition if the other deck already has a
+    // track (Dan's pick, a clicked candidate, or the autopilot's own
+    // fallback load).
     out.action = otherLoaded ? Action::Trigger : Action::PickAndLoad;
     return out;
+}
+
+CandidatePlan planCandidates(int allowedAvailable, int riskyAvailable, int maxCandidates) {
+    CandidatePlan plan;
+    plan.allowedCount = std::clamp(allowedAvailable, 0, maxCandidates);
+    const int remaining = maxCandidates - plan.allowedCount;
+    plan.riskyCount = std::clamp(riskyAvailable, 0, remaining);
+    return plan;
+}
+
+bool isRiskyFallback(int allowedAvailable, int riskyAvailable) {
+    return allowedAvailable <= 0 && riskyAvailable > 0;
 }
 
 namespace {
@@ -98,11 +129,18 @@ QString statusText(const Status& status) {
         return QStringLiteral("urmăresc deck %1 · iese la %2")
                 .arg(status.deckNumber)
                 .arg(minutesSeconds(status.mixOutSec));
+    case StatusKind::Choosing:
+        return QStringLiteral("deck %1 iese la %2 · alege o variantă mai jos")
+                .arg(status.deckNumber)
+                .arg(minutesSeconds(status.mixOutSec));
     case StatusKind::Picking:
         return QStringLiteral("deck %1 a ieșit · nicio sugestie disponibilă")
                 .arg(status.deckNumber);
     case StatusKind::Picked:
-        return QStringLiteral("am ales %1 · pregătesc tranziția").arg(status.trackText);
+        return (status.risky ? QStringLiteral("⚠ fără opțiune ideală, aleg cea mai apropiată "
+                                                "(riscant) · ")
+                              : QString()) +
+                QStringLiteral("am ales %1 · pregătesc tranziția").arg(status.trackText);
     case StatusKind::Armed:
         return QStringLiteral("tranziție armată · pornește pe bara următoare");
     case StatusKind::Running:
