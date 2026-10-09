@@ -86,33 +86,33 @@ constexpr const char* kBuiltinJsonScurt4 = R"JSON(    {
 constexpr const char* kBuiltinJsonStandard8 = R"JSON(    {
       "id": "standard8",
       "name": "Standard 8",
-      "notes": "Implicit. Faza 1 (bare 0-4): mediile piesei noi urca, inaltele ei doar pana la -12 dB; basul ei ramane taiat pana la bara 3.5. Faza 2 (bare 3.5-5.5): bas schimbat liniar pe ultimele 2 bare, pana exact cand piesa veche e complet afara (Dan, 2026-10-09: sincronizat cu regula 11/16 - basul ajunge full exact cand restul piesei vechi tace). Faza 3 (bare 4-5.5): mediile piesei vechi coboara la kill (smoothstep); din timpul 22 (ultima treime) se aude doar piesa noua (Dan, 2026-10-08). Filtrul si intrarea mai usoara in volum sunt oprite (enabled false); pune true ca sa le incerci.",
+      "notes": "Implicit. Faza 1 (bare 0-3.5): mediile piesei noi urca, inaltele ei doar pana la -12 dB; basul ei ramane taiat pana la bara 3. Faza 2 (bare 3-5): bas schimbat liniar pe ultimele 2 bare (Dan, 2026-10-09: toata secventa decalata cu o jumatate de bara mai devreme fata de versiunea anterioara, basul ajunge full cu 0.5 bara inainte de cand piesa veche tace complet). Faza 3 (bare 3.5-5): mediile piesei vechi coboara la kill (smoothstep); din timpul 22 (ultima treime) se aude doar piesa noua (Dan, 2026-10-08). Filtrul si intrarea mai usoara in volum sunt oprite (enabled false); pune true ca sa le incerci.",
       "length_bars": 8,
       "tempo": { "mode": "meet_return", "meet_bars": 4, "return_bars": 8 },
       "prepare_incoming": { "eq_low": "kill", "eq_mid": "kill", "eq_high": "kill" },
       "lanes": [
         { "deck": "incoming", "param": "eq_mid", "points": [
-          { "bar": 0, "value": "current" }, { "bar": 4, "value": "unity", "shape": "sin" } ] },
+          { "bar": 0, "value": "current" }, { "bar": 3.5, "value": "unity", "shape": "sin" } ] },
         { "deck": "incoming", "param": "eq_high", "points": [
-          { "bar": 0, "value": "current" }, { "bar": 4, "value": "-12dB", "shape": "sin" },
-          { "bar": 5, "value": "unity", "shape": "sin" } ] },
+          { "bar": 0, "value": "current" }, { "bar": 3.5, "value": "-12dB", "shape": "sin" },
+          { "bar": 4.5, "value": "unity", "shape": "sin" } ] },
         { "deck": "incoming", "param": "eq_low", "points": [
-          { "bar": 0, "value": "current" }, { "bar": 3.5, "value": "current" },
-          { "bar": 5.5, "value": "unity", "shape": "linear" } ] },
+          { "bar": 0, "value": "current" }, { "bar": 3, "value": "current" },
+          { "bar": 5, "value": "unity", "shape": "linear" } ] },
         { "deck": "outgoing", "param": "eq_low", "points": [
-          { "bar": 0, "value": "current" }, { "bar": 3.5, "value": "current" },
-          { "bar": 5.5, "value": "kill", "shape": "linear" } ] },
+          { "bar": 0, "value": "current" }, { "bar": 3, "value": "current" },
+          { "bar": 5, "value": "kill", "shape": "linear" } ] },
         { "deck": "outgoing", "param": "eq_high", "points": [
-          { "bar": 0, "value": "current" }, { "bar": 4, "value": "current" },
-          { "bar": 5, "value": "kill", "shape": "cos" } ] },
+          { "bar": 0, "value": "current" }, { "bar": 3.5, "value": "current" },
+          { "bar": 4.5, "value": "kill", "shape": "cos" } ] },
         { "deck": "outgoing", "param": "eq_mid", "points": [
-          { "bar": 0, "value": "current" }, { "bar": 4, "value": "current" },
-          { "bar": 5.5, "value": "kill", "shape": "smoothstep" } ] },
+          { "bar": 0, "value": "current" }, { "bar": 3.5, "value": "current" },
+          { "bar": 5, "value": "kill", "shape": "smoothstep" } ] },
         { "deck": "outgoing", "param": "filter", "enabled": false, "points": [
-          { "bar": 0, "value": "current" }, { "bar": 4, "value": "current" },
-          { "bar": 5.5, "value": 0.75, "shape": "smoothstep" } ] },
+          { "bar": 0, "value": "current" }, { "bar": 3.5, "value": "current" },
+          { "bar": 5, "value": 0.75, "shape": "smoothstep" } ] },
         { "deck": "incoming", "param": "volume", "enabled": false, "points": [
-          { "bar": 0, "value": "-2dB" }, { "bar": 2, "value": "current", "shape": "sin" } ] }
+          { "bar": 0, "value": "-2dB" }, { "bar": 1.5, "value": "current", "shape": "sin" } ] }
       ]
     },
 )JSON";
