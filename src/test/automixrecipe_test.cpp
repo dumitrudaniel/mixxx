@@ -106,10 +106,14 @@ TEST_F(AutomixRecipeTest, OutgoingIsOutBeforeTheLastThird) {
         for (const AutomixLane& lane : pRecipe->lanes) {
             if (lane.deck == AutomixDeckRole::Outgoing) {
                 EXPECT_NEAR(0.0, lane.valueAt(outBeat, 1.0), 1e-12) << id.toStdString();
-                // Untouched until its own swap-start point (Dan, 2026-10-09:
-                // the bass swap now starts before the midpoint, widened for a
-                // smoother ramp, so this can no longer assume lengthBeats/2).
-                EXPECT_DOUBLE_EQ(1.0, lane.valueAt(lane.points[1].beat, 1.0)) << id.toStdString();
+                // Untouched until the second-to-last point (the last
+                // "current" hold before the final ramp) - Dan, 2026-10-09:
+                // the bass swap can start before the midpoint for a
+                // smoother ramp, or even at bar 0 (Scurt 4, no hold at
+                // all), so this can no longer assume points[1] or
+                // lengthBeats/2.
+                EXPECT_DOUBLE_EQ(1.0, lane.valueAt(lane.points[lane.points.size() - 2].beat, 1.0))
+                        << id.toStdString();
             } else {
                 EXPECT_NEAR(1.0, lane.valueAt(outBeat, 0.0), 1e-12) << id.toStdString();
             }

@@ -59,7 +59,7 @@ constexpr const char* kBuiltinJsonUrgenta2 = R"JSON(    {
 constexpr const char* kBuiltinJsonScurt4 = R"JSON(    {
       "id": "scurt4",
       "name": "Scurt 4",
-      "notes": "4 bare: grila nesigura, semba/kompa live, mod scoala. Piesa veche iese complet pana la bara 2.75 (timpul 11, 11/16 din reteta). Basul se schimba liniar pe ultimele 2 bare inainte de 2.75 (Dan, 2026-10-09: voia o intrare mai lina, nu brusca pe final).",
+      "notes": "4 bare: grila nesigura, semba/kompa live, mod scoala. Piesa veche iese complet pana la bara 2.75 (timpul 11, 11/16 din reteta). Basul se schimba liniar de la bara 0, plin cel tarziu la bara 2 (Dan, 2026-10-09: pe o reteta asa scurta vrea basul nou intrat full cat mai din timp, nu sincronizat cu 11/16 ca la Standard 8/Lung 16).",
       "length_bars": 4,
       "tempo": { "mode": "meet_return", "meet_bars": 4, "return_bars": 8 },
       "prepare_incoming": { "eq_low": "kill", "eq_mid": "kill", "eq_high": "kill" },
@@ -70,11 +70,9 @@ constexpr const char* kBuiltinJsonScurt4 = R"JSON(    {
           { "bar": 0, "value": "current" }, { "bar": 2, "value": "-12dB", "shape": "sin" },
           { "bar": 2.5, "value": "unity", "shape": "sin" } ] },
         { "deck": "incoming", "param": "eq_low", "points": [
-          { "bar": 0, "value": "current" }, { "bar": 0.75, "value": "current" },
-          { "bar": 2.75, "value": "unity", "shape": "linear" } ] },
+          { "bar": 0, "value": "current" }, { "bar": 2, "value": "unity", "shape": "linear" } ] },
         { "deck": "outgoing", "param": "eq_low", "points": [
-          { "bar": 0, "value": "current" }, { "bar": 0.75, "value": "current" },
-          { "bar": 2.75, "value": "kill", "shape": "linear" } ] },
+          { "bar": 0, "value": "current" }, { "bar": 2, "value": "kill", "shape": "linear" } ] },
         { "deck": "outgoing", "param": "eq_high", "points": [
           { "bar": 0, "value": "current" }, { "bar": 2, "value": "current" },
           { "bar": 2.5, "value": "kill", "shape": "cos" } ] },
