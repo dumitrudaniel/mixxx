@@ -88,7 +88,7 @@ constexpr const char* kBuiltinJsonScurt4 = R"JSON(    {
 constexpr const char* kBuiltinJsonStandard8 = R"JSON(    {
       "id": "standard8",
       "name": "Standard 8",
-      "notes": "Implicit. Faza 1 (bare 0-4): mediile piesei noi urca, inaltele ei doar pana la -12 dB; basul ei ramane taiat pana la bara 1.5. Faza 2 (bare 1.5-5.5): bas schimbat liniar pe 4 bare, pana exact cand piesa veche e complet afara (Dan, 2026-10-09: schimbul rapid pe final parea prea brusc, voia unul mai liniar si mai lung). Faza 3 (bare 4-5.5): mediile piesei vechi coboara la kill (smoothstep); din timpul 22 (ultima treime) se aude doar piesa noua (Dan, 2026-10-08). Filtrul si intrarea mai usoara in volum sunt oprite (enabled false); pune true ca sa le incerci.",
+      "notes": "Implicit. Faza 1 (bare 0-4): mediile piesei noi urca, inaltele ei doar pana la -12 dB; basul ei ramane taiat pana la bara 3.5. Faza 2 (bare 3.5-5.5): bas schimbat liniar pe ultimele 2 bare, pana exact cand piesa veche e complet afara (Dan, 2026-10-09: sincronizat cu regula 11/16 - basul ajunge full exact cand restul piesei vechi tace). Faza 3 (bare 4-5.5): mediile piesei vechi coboara la kill (smoothstep); din timpul 22 (ultima treime) se aude doar piesa noua (Dan, 2026-10-08). Filtrul si intrarea mai usoara in volum sunt oprite (enabled false); pune true ca sa le incerci.",
       "length_bars": 8,
       "tempo": { "mode": "meet_return", "meet_bars": 4, "return_bars": 8 },
       "prepare_incoming": { "eq_low": "kill", "eq_mid": "kill", "eq_high": "kill" },
@@ -99,10 +99,10 @@ constexpr const char* kBuiltinJsonStandard8 = R"JSON(    {
           { "bar": 0, "value": "current" }, { "bar": 4, "value": "-12dB", "shape": "sin" },
           { "bar": 5, "value": "unity", "shape": "sin" } ] },
         { "deck": "incoming", "param": "eq_low", "points": [
-          { "bar": 0, "value": "current" }, { "bar": 1.5, "value": "current" },
+          { "bar": 0, "value": "current" }, { "bar": 3.5, "value": "current" },
           { "bar": 5.5, "value": "unity", "shape": "linear" } ] },
         { "deck": "outgoing", "param": "eq_low", "points": [
-          { "bar": 0, "value": "current" }, { "bar": 1.5, "value": "current" },
+          { "bar": 0, "value": "current" }, { "bar": 3.5, "value": "current" },
           { "bar": 5.5, "value": "kill", "shape": "linear" } ] },
         { "deck": "outgoing", "param": "eq_high", "points": [
           { "bar": 0, "value": "current" }, { "bar": 4, "value": "current" },
@@ -122,7 +122,7 @@ constexpr const char* kBuiltinJsonStandard8 = R"JSON(    {
 constexpr const char* kBuiltinJsonLung16 = R"JSON(    {
       "id": "lung16",
       "name": "Lung 16",
-      "notes": "16 bare: urban kiz, tarraxo, intro/outro lungi. Basul se schimba liniar pe 8 bare, pana exact cand piesa veche e complet afara (Dan, 2026-10-09). Piesa veche iese complet pana la bara 11 (timpul 44, 11/16 din reteta).",
+      "notes": "16 bare: urban kiz, tarraxo, intro/outro lungi. Basul se schimba liniar pe ultimele 2 bare, pana exact cand piesa veche e complet afara (Dan, 2026-10-09: sincronizat cu regula 11/16, ca la Standard 8). Piesa veche iese complet pana la bara 11 (timpul 44, 11/16 din reteta).",
       "length_bars": 16,
       "tempo": { "mode": "meet_return", "meet_bars": 4, "return_bars": 8 },
       "prepare_incoming": { "eq_low": "kill", "eq_mid": "kill", "eq_high": "kill" },
@@ -133,10 +133,10 @@ constexpr const char* kBuiltinJsonLung16 = R"JSON(    {
           { "bar": 0, "value": "current" }, { "bar": 8, "value": "-12dB", "shape": "sin" },
           { "bar": 9, "value": "unity", "shape": "sin" } ] },
         { "deck": "incoming", "param": "eq_low", "points": [
-          { "bar": 0, "value": "current" }, { "bar": 3, "value": "current" },
+          { "bar": 0, "value": "current" }, { "bar": 9, "value": "current" },
           { "bar": 11, "value": "unity", "shape": "linear" } ] },
         { "deck": "outgoing", "param": "eq_low", "points": [
-          { "bar": 0, "value": "current" }, { "bar": 3, "value": "current" },
+          { "bar": 0, "value": "current" }, { "bar": 9, "value": "current" },
           { "bar": 11, "value": "kill", "shape": "linear" } ] },
         { "deck": "outgoing", "param": "eq_high", "points": [
           { "bar": 0, "value": "current" }, { "bar": 8, "value": "current" },
