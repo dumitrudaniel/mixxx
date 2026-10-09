@@ -403,12 +403,19 @@ void AutomixTransitionController::loadVocalMaps() {
     m_outgoingVocalMap.reset();
     m_incomingVocalMap.reset();
     m_brainDbPath = m_pConfig->getValueString(ConfigKey(kDJAppGroup, QStringLiteral("BrainDb")));
-    // Without stems on both decks the guard cannot run: skip the lookup.
-    if (!m_recipe.vocalGuard.enabled || m_brainDbPath.isEmpty() ||
-            outgoingDeck().stemCount.get() != kGuardedStemCount ||
-            incomingDeck().stemCount.get() != kGuardedStemCount) {
+    if (!m_recipe.vocalGuard.enabled || m_brainDbPath.isEmpty()) {
         return;
     }
+    // Dan, 2026-10-09: this used to also skip the lookup unless both decks'
+    // stem_count was already 4 HERE, at arm() time. A fresh manual load
+    // (just loaded seconds before pressing MIX, e.g. for a quick test) can
+    // still be settling the stem-twin substitution at that exact instant;
+    // when it was, the maps were never loaded at all, for the whole
+    // transition - "GARDA VOCE inactiva" even once stem_count did reach 4
+    // moments later. planVocalGuard()/planKeyGuard() already re-check
+    // stem_count on their own, later, right when start() actually runs
+    // (ADR 0021 et al.) - that is the one authoritative gate; the lookup
+    // itself is one cheap read-only query, worth always attempting.
     m_outgoingVocalMap = AutomixVocalMapStore::lookup(
             m_brainDbPath, m_pOutgoingTrack->getLocation());
     m_incomingVocalMap = AutomixVocalMapStore::lookup(
