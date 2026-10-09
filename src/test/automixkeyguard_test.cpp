@@ -13,7 +13,7 @@ namespace {
 using namespace mixxx::track::io::key;
 
 constexpr AutomixKeyGuardStem kBass = AutomixKeyGuardStem::Bass;
-constexpr AutomixKeyGuardStem kMelody = AutomixKeyGuardStem::Melody;
+constexpr AutomixKeyGuardStem kOther = AutomixKeyGuardStem::Other;
 
 // Vocal guard plan with the outgoing voice fading at `outgoingFadeStart`
 // (phrase ended there naturally: the incoming voice follows after the fade).
@@ -59,9 +59,34 @@ TEST(AutomixKeyGuardTest, SwapAtHalfTheRecipe) {
     EXPECT_DOUBLE_EQ(18.0, plan.endBeat());
 }
 
+TEST(AutomixKeyGuardTest, VocalsCanFadeFasterThanBassAndOther) {
+    // Dan, 2026-10-09: "volumele de stems se misca foarte brusc, doar cel de
+    // voce as da voie sa se miste asa rapid" - bass/other get a slower fade
+    // (fadeBeats) than vocals (vocalsFadeBeats), swapping at the same beat.
+    const AutomixKeyGuardPlan plan =
+            AutomixKeyGuardPlanner::plan(32.0, 8.0, nullptr, 0.0, 2.0);
+    EXPECT_DOUBLE_EQ(16.0, plan.swapBeat);
+    EXPECT_DOUBLE_EQ(16.0, plan.melodySwapBeat);
+    EXPECT_DOUBLE_EQ(8.0, plan.fadeBeats);
+    EXPECT_DOUBLE_EQ(2.0, plan.vocalsFadeBeats);
+    // Bass and other still mid-fade at beat 20 (halfway through their 8).
+    EXPECT_GT(plan.outgoingGain(kBass, 20.0), 0.0);
+    EXPECT_GT(plan.outgoingGain(AutomixKeyGuardStem::Other, 20.0), 0.0);
+    // Vocals already fully swapped by then (done at beat 18).
+    EXPECT_NEAR(0.0, plan.outgoingGain(AutomixKeyGuardStem::Vocals, 20.0), 1e-12);
+    EXPECT_DOUBLE_EQ(1.0, plan.incomingGain(AutomixKeyGuardStem::Vocals, 18.0));
+    // endBeat is the slowest of the three (bass/other at 8 beats).
+    EXPECT_DOUBLE_EQ(24.0, plan.endBeat());
+}
+
+TEST(AutomixKeyGuardTest, VocalsFadeDefaultsToTheSharedSpeedWhenNotGiven) {
+    const AutomixKeyGuardPlan plan = AutomixKeyGuardPlanner::plan(32.0, 2.0);
+    EXPECT_DOUBLE_EQ(plan.fadeBeats, plan.vocalsFadeBeats);
+}
+
 TEST(AutomixKeyGuardTest, EqualPowerCrossfade) {
     const AutomixKeyGuardPlan plan = AutomixKeyGuardPlanner::plan(32.0, 2.0);
-    for (const AutomixKeyGuardStem stem : {kBass, kMelody}) {
+    for (const AutomixKeyGuardStem stem : {kBass, kOther}) {
         EXPECT_DOUBLE_EQ(1.0, plan.outgoingGain(stem, 0.0));
         EXPECT_DOUBLE_EQ(1.0, plan.outgoingGain(stem, 16.0));
         EXPECT_DOUBLE_EQ(0.0, plan.incomingGain(stem, 15.9));
@@ -92,11 +117,11 @@ TEST(AutomixKeyGuardTest, MelodySwapsAtTheVocalHandover) {
     EXPECT_TRUE(plan.earlyMelody());
     EXPECT_DOUBLE_EQ(18.0, plan.endBeat());
     // Melody: old out and new in over beats 8..10, equal-power.
-    EXPECT_DOUBLE_EQ(0.0, plan.incomingGain(kMelody, 7.99));
-    EXPECT_NEAR(1.0, plan.incomingGain(kMelody, 10.0), 1e-12);
-    EXPECT_NEAR(0.0, plan.outgoingGain(kMelody, 10.0), 1e-12);
-    const double out = plan.outgoingGain(kMelody, 9.0);
-    const double in = plan.incomingGain(kMelody, 9.0);
+    EXPECT_DOUBLE_EQ(0.0, plan.incomingGain(kOther, 7.99));
+    EXPECT_NEAR(1.0, plan.incomingGain(kOther, 10.0), 1e-12);
+    EXPECT_NEAR(0.0, plan.outgoingGain(kOther, 10.0), 1e-12);
+    const double out = plan.outgoingGain(kOther, 9.0);
+    const double in = plan.incomingGain(kOther, 9.0);
     EXPECT_NEAR(1.0, out * out + in * in, 1e-12);
     // Bass: still at half the recipe (the EQ keeps the incoming bass killed
     // until then); the old bass plays under the new melody.

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+
 #include "proto/keys.pb.h"
 
 struct AutomixVocalGuardPlan;
@@ -32,21 +34,31 @@ struct AutomixVocalGuardPlan;
 // Which key guard swap a harmonic stem follows.
 enum class AutomixKeyGuardStem {
     Bass,
-    // "other" and "vocals".
-    Melody,
+    Other,
+    Vocals,
 };
 
 struct AutomixKeyGuardPlan {
     // Bass: outgoing full until here, then cos fade over fadeBeats; incoming
     // muted until here, then sin fade over fadeBeats.
     double swapBeat = 0.0;
-    // Other + vocals: same curves from here. Equal to swapBeat unless the
-    // outgoing voice handed over earlier (see AutomixKeyGuardPlanner::plan).
+    // Other + vocals: same swap TIME from here (unaffected by the fade-speed
+    // split below). Equal to swapBeat unless the outgoing voice handed over
+    // earlier (see AutomixKeyGuardPlanner::plan).
     double melodySwapBeat = 0.0;
+    // Bass + other: Dan, 2026-10-09 ("volumele de stems se misca foarte
+    // brusc, doar cel de voce as da voie sa se miste asa rapid") - these two
+    // fade more slowly than vocals by default (see AutomixKeyGuard's own
+    // default in mixer/automixrecipe.h).
     double fadeBeats = 0.0;
+    // Vocals only: can be faster (or slower) than bass/other independently.
+    double vocalsFadeBeats = 0.0;
 
     double swapBeatOf(AutomixKeyGuardStem stem) const {
         return stem == AutomixKeyGuardStem::Bass ? swapBeat : melodySwapBeat;
+    }
+    double fadeBeatsOf(AutomixKeyGuardStem stem) const {
+        return stem == AutomixKeyGuardStem::Vocals ? vocalsFadeBeats : fadeBeats;
     }
     double outgoingGain(AutomixKeyGuardStem stem, double beat) const;
     double incomingGain(AutomixKeyGuardStem stem, double beat) const;
@@ -54,10 +66,11 @@ struct AutomixKeyGuardPlan {
     bool earlyMelody() const {
         return melodySwapBeat < swapBeat;
     }
-    // Transition beat from which every gain is final (the bass swap is the
-    // later one).
+    // Transition beat from which every gain is final (the slowest of the
+    // three stems' own fades).
     double endBeat() const {
-        return swapBeat + fadeBeats;
+        return std::max({swapBeat + fadeBeats, melodySwapBeat + fadeBeats,
+                melodySwapBeat + vocalsFadeBeats});
     }
 };
 
@@ -81,10 +94,13 @@ class AutomixKeyGuardPlanner {
     // Bass swap at half the recipe: Standard 8 -> 16, like the vocal guard's
     // latest handover. Melody swap: see melodySwapBeat(); pVocalPlan is the
     // vocal guard's plan when that guard is active, nullptr otherwise.
+    // vocalsFadeBeats defaults to `fadeBeats` (same speed for all three
+    // stems) when not given.
     static AutomixKeyGuardPlan plan(double lengthBeats,
             double fadeBeats,
             const AutomixVocalGuardPlan* pVocalPlan = nullptr,
-            double incomingPlayAtBeat = 0.0);
+            double incomingPlayAtBeat = 0.0,
+            double vocalsFadeBeats = -1.0);
 
     // max(outgoing voice fade start, incomingPlayAtBeat + kLeadInBeats),
     // snapped up to a bar line, capped at swapBeat. swapBeat itself without a

@@ -392,7 +392,8 @@ TEST_F(AutomixRecipeTest, VocalGuardDefaultsOnAndCanBeSwitchedOff) {
 TEST_F(AutomixRecipeTest, KeyGuardDefaultsOnAndCanBeSwitchedOff) {
     const AutomixRecipe& standard = *AutomixRecipeBook::builtin().find(QStringLiteral("standard8"));
     EXPECT_TRUE(standard.keyGuard.enabled);
-    EXPECT_DOUBLE_EQ(2.0, standard.keyGuard.fadeBeats);
+    EXPECT_DOUBLE_EQ(8.0, standard.keyGuard.fadeBeats);
+    EXPECT_DOUBLE_EQ(2.0, standard.keyGuard.vocalsFadeBeats);
 
     AutomixRecipeBook book;
     QString error;

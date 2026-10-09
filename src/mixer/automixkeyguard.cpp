@@ -20,11 +20,11 @@ double fadeProgress(double beat, double start, double length) {
 } // namespace
 
 double AutomixKeyGuardPlan::outgoingGain(AutomixKeyGuardStem stem, double beat) const {
-    return std::cos(fadeProgress(beat, swapBeatOf(stem), fadeBeats) * kHalfPi);
+    return std::cos(fadeProgress(beat, swapBeatOf(stem), fadeBeatsOf(stem)) * kHalfPi);
 }
 
 double AutomixKeyGuardPlan::incomingGain(AutomixKeyGuardStem stem, double beat) const {
-    return std::sin(fadeProgress(beat, swapBeatOf(stem), fadeBeats) * kHalfPi);
+    return std::sin(fadeProgress(beat, swapBeatOf(stem), fadeBeatsOf(stem)) * kHalfPi);
 }
 
 // static
@@ -65,10 +65,13 @@ double AutomixKeyGuardPlanner::melodySwapBeat(double swapBeat,
 AutomixKeyGuardPlan AutomixKeyGuardPlanner::plan(double lengthBeats,
         double fadeBeats,
         const AutomixVocalGuardPlan* pVocalPlan,
-        double incomingPlayAtBeat) {
+        double incomingPlayAtBeat,
+        double vocalsFadeBeats) {
     AutomixKeyGuardPlan plan;
     plan.swapBeat = std::max(0.0, lengthBeats / 2.0);
     plan.melodySwapBeat = melodySwapBeat(plan.swapBeat, pVocalPlan, incomingPlayAtBeat);
     plan.fadeBeats = std::max(0.0, fadeBeats);
+    // -1.0 (the default) means "not given": same speed as bass/other.
+    plan.vocalsFadeBeats = vocalsFadeBeats >= 0.0 ? vocalsFadeBeats : plan.fadeBeats;
     return plan;
 }

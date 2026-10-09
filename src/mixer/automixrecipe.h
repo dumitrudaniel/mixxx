@@ -51,11 +51,16 @@ struct AutomixVocalGuard {
 
 // "Doar tobe peste" (Dan, docs/decisions/0022): when the two keys clash, only
 // the incoming drums play until half the recipe; there the harmonic stems
-// (bass, other, vocals) swap in fadeBeats. Needs stem tracks with a key;
-// otherwise the recipe runs on the EQs alone.
+// swap - bass and other over fadeBeats, vocals over vocalsFadeBeats. Needs
+// stem tracks with a key; otherwise the recipe runs on the EQs alone.
 struct AutomixKeyGuard {
     bool enabled = true;
-    double fadeBeats = 2.0;
+    // Bass + other (Dan, 2026-10-09: "volumele de stems se misca foarte
+    // brusc" - slowed down from the original 2 beats).
+    double fadeBeats = 8.0;
+    // Vocals only, independent of the above - Dan: "doar cel de voce as da
+    // voie sa se miste asa rapid", kept at the original fast speed.
+    double vocalsFadeBeats = 2.0;
 };
 
 // Live tempo during and after a transition (Dan's decision #6,

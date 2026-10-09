@@ -308,12 +308,20 @@ bool parseKeyGuard(const QJsonValue& json, AutomixKeyGuard* pGuard, QString* pEr
         *pError = QStringLiteral("key_guard: unknown mode \"%1\"").arg(mode);
         return false;
     }
-    const double fadeBeats = object.value(QStringLiteral("fade_beats")).toDouble(2.0);
+    const double fadeBeats =
+            object.value(QStringLiteral("fade_beats")).toDouble(pGuard->fadeBeats);
     if (fadeBeats < 0.0) {
         *pError = QStringLiteral("key_guard: fade_beats must be >= 0");
         return false;
     }
+    const double vocalsFadeBeats = object.value(QStringLiteral("vocals_fade_beats"))
+                                            .toDouble(pGuard->vocalsFadeBeats);
+    if (vocalsFadeBeats < 0.0) {
+        *pError = QStringLiteral("key_guard: vocals_fade_beats must be >= 0");
+        return false;
+    }
     pGuard->fadeBeats = fadeBeats;
+    pGuard->vocalsFadeBeats = vocalsFadeBeats;
     return true;
 }
 

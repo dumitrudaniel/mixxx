@@ -67,10 +67,19 @@ bool isHarmonicStem(AutomixParam param) {
 }
 
 // The bass swaps with the EQ at half the recipe; other + vocals may swap
-// earlier, at the vocal handover (AutomixKeyGuardPlanner::melodySwapBeat).
+// earlier, at the vocal handover (AutomixKeyGuardPlanner::melodySwapBeat) -
+// same SWAP TIME for other/vocals, but Dan (2026-10-09) wants them to fade
+// at different SPEEDS (AutomixKeyGuardPlan::fadeBeatsOf), hence the 3-way
+// enum rather than collapsing other+vocals into one "Melody" value.
 AutomixKeyGuardStem keyGuardStem(AutomixParam param) {
-    return param == AutomixParam::StemBass ? AutomixKeyGuardStem::Bass
-                                           : AutomixKeyGuardStem::Melody;
+    switch (param) {
+    case AutomixParam::StemBass:
+        return AutomixKeyGuardStem::Bass;
+    case AutomixParam::StemVocals:
+        return AutomixKeyGuardStem::Vocals;
+    default:
+        return AutomixKeyGuardStem::Other;
+    }
 }
 
 // "[Channel1]" + 4 -> "[Channel1_Stem4]" (Mixxx 2.6 stem groups, file order).
@@ -589,7 +598,8 @@ QString AutomixTransitionController::planKeyGuard() {
     m_keyGuardPlan = AutomixKeyGuardPlanner::plan(m_recipe.lengthBeats,
             m_recipe.keyGuard.fadeBeats,
             m_vocalGuardActive ? &m_vocalGuardPlan : nullptr,
-            m_recipe.incomingPlayAtBeat);
+            m_recipe.incomingPlayAtBeat,
+            m_recipe.keyGuard.vocalsFadeBeats);
     m_keyGuardActive = true;
     m_runLengthBeats = std::max(m_runLengthBeats, m_keyGuardPlan.endBeat());
     const auto beats = [](double value) {
